@@ -793,25 +793,47 @@ export ANTHROPIC_API_KEY="${claudeApiKey}"
 export TELEGRAM_BOT_TOKEN="${telegramBotToken}"
 
 # Log startup
-echo "[$(date +'%Y-%m-%d %H:%M:%S')] Starting Clawdbot gateway..." >> /tmp/clawdbot.log
-echo "[$(date +'%Y-%m-%d %H:%M:%S')] NVM_DIR: $NVM_DIR" >> /tmp/clawdbot.log
-echo "[$(date +'%Y-%m-%d %H:%M:%S')] Node version: $(node -v 2>&1 || echo 'node not found')" >> /tmp/clawdbot.log
-echo "[$(date +'%Y-%m-%d %H:%M:%S')] PATH: $PATH" >> /tmp/clawdbot.log
+LOG_FILE="/tmp/clawdbot.log"
+echo "[$(date +'%Y-%m-%d %H:%M:%S')] Starting Clawdbot gateway..." >> "$LOG_FILE"
+echo "[$(date +'%Y-%m-%d %H:%M:%S')] NVM_DIR: $NVM_DIR" >> "$LOG_FILE"
+echo "[$(date +'%Y-%m-%d %H:%M:%S')] Node version: $(node -v 2>&1 || echo 'node not found')" >> "$LOG_FILE"
+echo "[$(date +'%Y-%m-%d %H:%M:%S')] PATH: $PATH" >> "$LOG_FILE"
 
 # Check if clawdbot is available
 if ! command -v clawdbot &> /dev/null; then
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: clawdbot command not found" >> /tmp/clawdbot.log
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] Checking NVM..." >> /tmp/clawdbot.log
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] Node path: $(which node || echo 'node not in PATH')" >> /tmp/clawdbot.log
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] Clawdbot path: $(find ~/.nvm -name clawdbot 2>/dev/null | head -1 || echo 'clawdbot not found')" >> /tmp/clawdbot.log
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: clawdbot command not found" >> "$LOG_FILE"
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] Checking NVM..." >> "$LOG_FILE"
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] Node path: $(which node || echo 'node not in PATH')" >> "$LOG_FILE"
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] Clawdbot path: $(find ~/.nvm -name clawdbot 2>/dev/null | head -1 || echo 'clawdbot not found')" >> "$LOG_FILE"
     exit 1
 fi
 
-echo "[$(date +'%Y-%m-%d %H:%M:%S')] Clawdbot found: $(which clawdbot)" >> /tmp/clawdbot.log
-echo "[$(date +'%Y-%m-%d %H:%M:%S')] Running: clawdbot gateway run" >> /tmp/clawdbot.log
+echo "[$(date +'%Y-%m-%d %H:%M:%S')] Clawdbot found: $(which clawdbot)" >> "$LOG_FILE"
+echo "[$(date +'%Y-%m-%d %H:%M:%S')] Running: clawdbot gateway run" >> "$LOG_FILE"
+if [ -n "$ANTHROPIC_API_KEY" ]; then
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] ANTHROPIC_API_KEY: SET" >> "$LOG_FILE"
+else
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] ANTHROPIC_API_KEY: NOT SET" >> "$LOG_FILE"
+fi
+if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] TELEGRAM_BOT_TOKEN: SET" >> "$LOG_FILE"
+else
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] TELEGRAM_BOT_TOKEN: NOT SET" >> "$LOG_FILE"
+fi
 
-# Run gateway and redirect all output to log
-exec clawdbot gateway run >> /tmp/clawdbot.log 2>&1
+# Check config file exists
+if [ -f ~/.clawdbot/clawdbot.json ]; then
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] Config file exists" >> "$LOG_FILE"
+else
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] WARNING: Config file not found at ~/.clawdbot/clawdbot.json" >> "$LOG_FILE"
+fi
+
+# Run gateway and capture all output (both stdout and stderr)
+# Don't use exec - let the shell stay alive to capture errors
+clawdbot gateway run >> "$LOG_FILE" 2>&1
+EXIT_CODE=$?
+echo "[$(date +'%Y-%m-%d %H:%M:%S')] Gateway exited with code: $EXIT_CODE" >> "$LOG_FILE"
+exit $EXIT_CODE
 `
 
     const scriptB64 = Buffer.from(startupScript).toString('base64')

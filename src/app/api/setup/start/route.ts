@@ -149,7 +149,7 @@ async function runSetupProcess(
       try {
         computer = await orgoClient.createComputer(project.id, computerName, {
           os: 'linux',
-          ram: 4,
+          ram: 8,
           cpu: 2,
         })
         break // Success, exit retry loop
