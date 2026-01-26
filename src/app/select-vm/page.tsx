@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useSession, signOut } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Loader2, ArrowRight, CheckCircle2, LogOut, X, Key, FolderPlus, AlertCircle, ExternalLink, Globe, Server } from 'lucide-react'
+import { Loader2, ArrowRight, CheckCircle2, LogOut, X, Key, FolderPlus, AlertCircle, ExternalLink, Globe, Server, Plus, Trash2, Play, Power, ArrowLeft, ExternalLinkIcon, Settings } from 'lucide-react'
 
 type VMProvider = 'orgo' | 'e2b' | 'flyio' | 'aws' | 'railway' | 'digitalocean' | 'hetzner' | 'modal'
 
@@ -38,12 +38,26 @@ interface AWSInstanceType {
   freeTier?: boolean
 }
 
-interface AWSInstance {
+interface UserVM {
   id: string
   name: string
-  publicIp?: string
+  provider: string
   status: string
-  instanceType: string
+  orgoProjectId?: string
+  orgoProjectName?: string
+  orgoComputerId?: string
+  orgoComputerUrl?: string
+  awsInstanceId?: string
+  awsInstanceType?: string
+  awsRegion?: string
+  awsPublicIp?: string
+  createdAt: string
+}
+
+interface Credentials {
+  hasOrgoApiKey: boolean
+  hasAwsCredentials: boolean
+  awsRegion: string
 }
 
 const vmOptions: VMOption[] = [
@@ -122,7 +136,14 @@ const vmOptions: VMOption[] = [
 export default function SelectVMPage() {
   const { data: session, status } = useSession()
   const router = useRouter()
-  const [selectedProvider, setSelectedProvider] = useState<VMProvider | null>(null)
+  
+  // VM list state
+  const [userVMs, setUserVMs] = useState<UserVM[]>([])
+  const [credentials, setCredentials] = useState<Credentials | null>(null)
+  const [isLoadingVMs, setIsLoadingVMs] = useState(true)
+  const [deletingVMId, setDeletingVMId] = useState<string | null>(null)
+  
+  // General state
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -137,6 +158,7 @@ export default function SelectVMPage() {
   const [newProjectName, setNewProjectName] = useState('claude-brain')
   const [isCreatingProject, setIsCreatingProject] = useState(false)
   const [orgoError, setOrgoError] = useState<string | null>(null)
+  const [orgoVMName, setOrgoVMName] = useState('')
 
   // AWS configuration modal state
   const [showAWSModal, setShowAWSModal] = useState(false)
@@ -148,8 +170,31 @@ export default function SelectVMPage() {
   const [awsKeyValidated, setAwsKeyValidated] = useState(false)
   const [awsRegions, setAwsRegions] = useState<AWSRegion[]>([])
   const [awsInstanceTypes, setAwsInstanceTypes] = useState<AWSInstanceType[]>([])
-  const [awsInstances, setAwsInstances] = useState<AWSInstance[]>([])
   const [awsError, setAwsError] = useState<string | null>(null)
+  const [awsVMName, setAwsVMName] = useState('')
+
+  // Load user's VMs and credentials
+  useEffect(() => {
+    if (session?.user?.id) {
+      loadVMs()
+    }
+  }, [session?.user?.id])
+
+  const loadVMs = async () => {
+    setIsLoadingVMs(true)
+    try {
+      const res = await fetch('/api/vms')
+      const data = await res.json()
+      if (res.ok) {
+        setUserVMs(data.vms || [])
+        setCredentials(data.credentials || null)
+      }
+    } catch (e) {
+      console.error('Failed to load VMs:', e)
+    } finally {
+      setIsLoadingVMs(false)
+    }
+  }
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -172,19 +217,74 @@ export default function SelectVMPage() {
     return null
   }
 
-  const handleProviderClick = (provider: VMProvider) => {
+  const handleProviderClick = async (provider: VMProvider) => {
     if (!vmOptions.find(opt => opt.id === provider)?.available) {
-      return // Don't allow selection of unavailable options
+      return
     }
 
     if (provider === 'orgo') {
-      // Show Orgo configuration modal
-      setShowOrgoModal(true)
+      setOrgoVMName(`Orgo VM ${userVMs.filter(vm => vm.provider === 'orgo').length + 1}`)
       setOrgoError(null)
+      
+      // If we already have Orgo API key stored, skip to project selection
+      if (credentials?.hasOrgoApiKey) {
+        setShowOrgoModal(true)
+        setKeyValidated(true)
+        // Fetch projects with stored key
+        await fetchOrgoProjects()
+      } else {
+        setShowOrgoModal(true)
+      }
     } else if (provider === 'aws') {
-      // Show AWS configuration modal
-      setShowAWSModal(true)
+      setAwsVMName(`AWS VM ${userVMs.filter(vm => vm.provider === 'aws').length + 1}`)
       setAwsError(null)
+      
+      // If we already have AWS credentials stored, skip to configuration
+      if (credentials?.hasAwsCredentials) {
+        setShowAWSModal(true)
+        setAwsKeyValidated(true)
+        setAwsRegion(credentials.awsRegion || 'us-east-1')
+        // Fetch AWS data with stored credentials
+        await fetchAWSData()
+      } else {
+        setShowAWSModal(true)
+      }
+    }
+  }
+
+  const fetchOrgoProjects = async () => {
+    try {
+      const res = await fetch('/api/setup/orgo/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ useStored: true }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setOrgoProjects(data.projects || [])
+        if (!data.hasProjects) {
+          setShowCreateProject(true)
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch Orgo projects:', e)
+    }
+  }
+
+  const fetchAWSData = async () => {
+    try {
+      const res = await fetch('/api/setup/aws/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ useStored: true }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setAwsRegions(data.regions || [])
+        setAwsInstanceTypes(data.instanceTypes || [])
+      }
+    } catch (e) {
+      console.error('Failed to fetch AWS data:', e)
     }
   }
 
@@ -213,7 +313,6 @@ export default function SelectVMPage() {
       setKeyValidated(true)
       setOrgoProjects(data.projects || [])
       
-      // If no projects exist, show create project form
       if (!data.hasProjects) {
         setShowCreateProject(true)
       }
@@ -246,11 +345,9 @@ export default function SelectVMPage() {
         throw new Error(data.error || 'Failed to create project')
       }
 
-      // Select the newly created project
       setSelectedProject(data.project)
       setShowCreateProject(false)
       
-      // If the project was created, add it to the list
       if (data.project.id) {
         setOrgoProjects(prev => [...prev, data.project])
       }
@@ -288,10 +385,7 @@ export default function SelectVMPage() {
       return
     }
 
-    // If there are no projects and we're showing create project form,
-    // the user needs to either create a project or select one
     if (orgoProjects.length === 0 && !selectedProject) {
-      // Auto-create the project with the default name
       await handleCreateProject()
       if (orgoError) return
     }
@@ -301,26 +395,38 @@ export default function SelectVMPage() {
       return
     }
 
+    if (!orgoVMName.trim()) {
+      setOrgoError('Please enter a name for your VM')
+      return
+    }
+
     setIsSubmitting(true)
     setError(null)
 
     try {
-      const res = await fetch('/api/setup/select-vm', {
+      // Create the VM
+      const res = await fetch('/api/vms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vmProvider: 'orgo' }),
+        body: JSON.stringify({
+          name: orgoVMName.trim(),
+          provider: 'orgo',
+          orgoProjectId: selectedProject?.id,
+          orgoProjectName: selectedProject?.name,
+        }),
       })
 
       if (!res.ok) {
         const data = await res.json()
-        throw new Error(data.error || 'Failed to save VM provider selection')
+        throw new Error(data.error || 'Failed to create VM')
       }
 
-      setSelectedProvider('orgo')
-      setShowOrgoModal(false)
+      const data = await res.json()
       
-      // Redirect to learning sources page
-      router.push('/learning-sources')
+      closeOrgoModal()
+      
+      // Redirect to learning-sources page for this VM
+      router.push(`/learning-sources?vmId=${data.vm.id}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong')
       setIsSubmitting(false)
@@ -336,6 +442,7 @@ export default function SelectVMPage() {
     setShowCreateProject(false)
     setNewProjectName('claude-brain')
     setOrgoError(null)
+    setOrgoVMName('')
   }
 
   // AWS handlers
@@ -368,7 +475,6 @@ export default function SelectVMPage() {
       setAwsKeyValidated(true)
       setAwsRegions(data.regions || [])
       setAwsInstanceTypes(data.instanceTypes || [])
-      setAwsInstances(data.instances || [])
     } catch (e) {
       setAwsError(e instanceof Error ? e.message : 'Failed to validate AWS credentials')
     } finally {
@@ -382,36 +488,50 @@ export default function SelectVMPage() {
       return
     }
 
+    if (!awsVMName.trim()) {
+      setAwsError('Please enter a name for your VM')
+      return
+    }
+
     setIsSubmitting(true)
     setError(null)
 
     try {
-      // Save AWS configuration
-      await fetch('/api/setup/aws/configure', {
+      // Save AWS configuration if new credentials were entered
+      if (awsAccessKeyId && awsSecretAccessKey) {
+        await fetch('/api/setup/aws/configure', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            region: awsRegion,
+            instanceType: awsInstanceType,
+          }),
+        })
+      }
+
+      // Create the VM
+      const res = await fetch('/api/vms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          region: awsRegion,
-          instanceType: awsInstanceType,
+          name: awsVMName.trim(),
+          provider: 'aws',
+          awsInstanceType,
+          awsRegion,
         }),
-      })
-
-      const res = await fetch('/api/setup/select-vm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vmProvider: 'aws' }),
       })
 
       if (!res.ok) {
         const data = await res.json()
-        throw new Error(data.error || 'Failed to save VM provider selection')
+        throw new Error(data.error || 'Failed to create VM')
       }
 
-      setSelectedProvider('aws')
-      setShowAWSModal(false)
+      const data = await res.json()
       
-      // Redirect to learning sources page
-      router.push('/learning-sources')
+      closeAWSModal()
+      
+      // Redirect to learning-sources page for this VM
+      router.push(`/learning-sources?vmId=${data.vm.id}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong')
       setIsSubmitting(false)
@@ -427,8 +547,63 @@ export default function SelectVMPage() {
     setAwsKeyValidated(false)
     setAwsRegions([])
     setAwsInstanceTypes([])
-    setAwsInstances([])
     setAwsError(null)
+    setAwsVMName('')
+  }
+
+  const handleDeleteVM = async (vmId: string) => {
+    if (!confirm('Are you sure you want to delete this VM?')) {
+      return
+    }
+
+    setDeletingVMId(vmId)
+    try {
+      const res = await fetch(`/api/vms/${vmId}`, {
+        method: 'DELETE',
+      })
+
+      if (!res.ok) {
+        throw new Error('Failed to delete VM')
+      }
+
+      setUserVMs(prev => prev.filter(vm => vm.id !== vmId))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to delete VM')
+    } finally {
+      setDeletingVMId(null)
+    }
+  }
+
+  const handleContinue = () => {
+    if (userVMs.length === 0) {
+      setError('Please add at least one VM to continue')
+      return
+    }
+    router.push('/learning-sources')
+  }
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'running':
+        return 'bg-green-500/10 text-green-400 border-green-500/30'
+      case 'stopped':
+        return 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30'
+      case 'error':
+        return 'bg-red-500/10 text-red-400 border-red-500/30'
+      default:
+        return 'bg-blue-500/10 text-blue-400 border-blue-500/30'
+    }
+  }
+
+  const getProviderIcon = (provider: string) => {
+    switch (provider) {
+      case 'orgo':
+        return <img src="/logos/orgo.png" alt="Orgo" className="w-8 h-8 object-contain" />
+      case 'aws':
+        return <img src="/logos/aws.png" alt="AWS" className="w-8 h-8 object-contain" />
+      default:
+        return <Server className="w-8 h-8 text-sam-text-dim" />
+    }
   }
 
   return (
@@ -462,13 +637,13 @@ export default function SelectVMPage() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
-          className="mb-12 text-center"
+          className="mb-8 text-center"
         >
           <h1 className="text-4xl md:text-5xl font-display font-bold mb-4 text-sam-text leading-tight">
-            Choose your VM provider
+            Your Virtual Machines
           </h1>
           <p className="text-lg text-sam-text-dim max-w-2xl mx-auto font-body leading-relaxed">
-            Select a virtual machine provider to host your AI agent executing tasks 24/7 with persistant memory.
+            Manage your AI agent VMs. You can run multiple VMs from different providers simultaneously.
           </p>
         </motion.div>
 
@@ -479,106 +654,214 @@ export default function SelectVMPage() {
             animate={{ opacity: 1, height: 'auto' }}
             className="mb-6 p-4 rounded-lg bg-sam-error/10 border border-sam-error/30 flex items-start gap-3"
           >
+            <AlertCircle className="w-5 h-5 text-sam-error flex-shrink-0 mt-0.5" />
             <p className="text-sam-error text-sm">{error}</p>
+            <button onClick={() => setError(null)} className="ml-auto text-sam-error hover:text-sam-error/80">
+              <X className="w-4 h-4" />
+            </button>
           </motion.div>
         )}
 
-        {/* VM Options Grid */}
+        {/* Active VMs Section */}
+        {isLoadingVMs ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-8 h-8 animate-spin text-sam-accent" />
+          </div>
+        ) : userVMs.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.1 }}
+            className="mb-8"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-display font-semibold text-sam-text flex items-center gap-2">
+                <Server className="w-5 h-5 text-sam-accent" />
+                Active VMs ({userVMs.length})
+              </h2>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {userVMs.map((vm, index) => (
+                <motion.div
+                  key={vm.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3, delay: 0.05 * index }}
+                  className="p-4 rounded-xl border border-sam-border bg-sam-surface/50 hover:border-sam-accent/50 transition-all group flex flex-col h-full"
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      {getProviderIcon(vm.provider)}
+                      <div>
+                        <h3 className="font-medium text-sam-text">{vm.name}</h3>
+                        <p className="text-xs text-sam-text-dim capitalize">{vm.provider}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleDeleteVM(vm.id)
+                        }}
+                        disabled={deletingVMId === vm.id}
+                        className="p-1.5 rounded-lg text-sam-text-dim hover:text-sam-error hover:bg-sam-error/10 transition-all disabled:opacity-50"
+                        title="Delete VM"
+                      >
+                        {deletingVMId === vm.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div className="flex-1 flex flex-col justify-between">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-mono border ${getStatusColor(vm.status)}`}>
+                        {vm.status}
+                      </span>
+                      <span className="text-xs text-sam-text-dim">
+                        {vm.provider === 'aws' && vm.awsInstanceType}
+                        {vm.provider === 'orgo' && vm.orgoProjectName}
+                      </span>
+                    </div>
+                    <div>
+                      {vm.provider === 'aws' && vm.awsPublicIp && (
+                        <p className="text-xs text-sam-text-dim mb-3 font-mono">
+                          IP: {vm.awsPublicIp}
+                        </p>
+                      )}
+                      {vm.provider === 'orgo' && vm.orgoComputerId && (
+                        <p className="text-xs text-sam-text-dim mb-3 font-mono">
+                          Computer: {vm.orgoComputerId}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Open/Manage VM Button */}
+                  <button
+                    onClick={() => router.push(`/learning-sources?vmId=${vm.id}`)}
+                    className="w-full mt-2 px-4 py-2 rounded-lg bg-sam-accent/10 border border-sam-accent/30 text-sam-accent hover:bg-sam-accent/20 hover:border-sam-accent/50 transition-all flex items-center justify-center gap-2 text-sm font-medium"
+                  >
+                    <Settings className="w-4 h-4" />
+                    Open & Configure
+                  </button>
+                </motion.div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Add New VM Section */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.1 }}
-          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8"
+          transition={{ duration: 0.6, delay: 0.2 }}
+          className="mb-8"
         >
-          {vmOptions.map((option, index) => {
-            const isSelected = selectedProvider === option.id
-            const isDisabled = !option.available || isSubmitting
+          <h2 className="text-xl font-display font-semibold text-sam-text mb-4 flex items-center gap-2">
+            <Plus className="w-5 h-5 text-sam-accent" />
+            Add a New VM
+          </h2>
+          
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {vmOptions.map((option, index) => {
+              const isDisabled = !option.available || isSubmitting
 
-            return (
-              <motion.button
-                key={option.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: 0.1 * index }}
-                onClick={() => handleProviderClick(option.id)}
-                disabled={isDisabled}
-                className={`relative p-5 rounded-xl border transition-all duration-300 text-left ${
-                  isSelected
-                    ? 'border-sam-accent bg-sam-accent/10 shadow-lg shadow-sam-accent/20'
-                    : isDisabled
-                    ? 'border-sam-border bg-sam-surface/30 opacity-60 cursor-not-allowed'
-                    : 'border-sam-border bg-sam-surface/30 hover:border-sam-accent/50 hover:bg-sam-surface/40 cursor-pointer'
-                }`}
-              >
-                {/* Icon */}
-                <div className="flex items-center justify-center mb-4 h-14">
-                  {option.icon}
-                </div>
-
-                {/* Name and Badge */}
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-lg font-display font-semibold text-sam-text">
-                    {option.name}
-                  </h3>
-                  {isSelected && (
-                    <CheckCircle2 className="w-5 h-5 text-sam-accent" />
-                  )}
-                </div>
-                {option.comingSoon && (
-                  <span className="inline-block text-xs font-mono text-sam-text-dim bg-sam-surface px-2 py-0.5 rounded mb-2">
-                    Coming Soon
-                  </span>
-                )}
-                {option.available && (
-                  <span className="inline-block text-xs font-mono text-green-400 bg-green-400/10 px-2 py-0.5 rounded mb-2">
-                    Available
-                  </span>
-                )}
-
-                {/* Description */}
-                <p className="text-sm text-sam-text-dim font-body leading-relaxed mb-3">
-                  {option.description}
-                </p>
-
-                {/* Learn More Link */}
-                <a
-                  href={option.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  className="inline-flex items-center gap-1 text-sm text-sam-accent hover:text-sam-accent/80 transition-colors font-mono"
+              return (
+                <motion.button
+                  key={option.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5, delay: 0.1 * index }}
+                  onClick={() => handleProviderClick(option.id)}
+                  disabled={isDisabled}
+                  className={`relative p-5 rounded-xl border transition-all duration-300 text-left ${
+                    isDisabled
+                      ? 'border-sam-border bg-sam-surface/30 opacity-60 cursor-not-allowed'
+                      : 'border-sam-border bg-sam-surface/30 hover:border-sam-accent/50 hover:bg-sam-surface/40 cursor-pointer'
+                  }`}
                 >
-                  Learn more
-                  <ArrowRight className="w-3 h-3" />
-                </a>
+                  {/* Icon */}
+                  <div className="flex items-center justify-center mb-4 h-14">
+                    {option.icon}
+                  </div>
 
-                {/* Selection Indicator */}
-                {isSelected && (
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="absolute top-4 right-4"
+                  {/* Name and Badge */}
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-lg font-display font-semibold text-sam-text">
+                      {option.name}
+                    </h3>
+                  </div>
+                  {option.comingSoon && (
+                    <span className="inline-block text-xs font-mono text-sam-text-dim bg-sam-surface px-2 py-0.5 rounded mb-2">
+                      Coming Soon
+                    </span>
+                  )}
+                  {option.available && (
+                    <span className="inline-block text-xs font-mono text-green-400 bg-green-400/10 px-2 py-0.5 rounded mb-2">
+                      Available
+                    </span>
+                  )}
+
+                  {/* Description */}
+                  <p className="text-sm text-sam-text-dim font-body leading-relaxed mb-3">
+                    {option.description}
+                  </p>
+
+                  {/* Learn More Link */}
+                  <a
+                    href={option.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="inline-flex items-center gap-1 text-sm text-sam-accent hover:text-sam-accent/80 transition-colors font-mono"
                   >
-                    <div className="w-6 h-6 rounded-full bg-sam-accent flex items-center justify-center">
-                      <CheckCircle2 className="w-4 h-4 text-sam-bg" />
+                    Learn more
+                    <ArrowRight className="w-3 h-3" />
+                  </a>
+
+                  {/* Quick add indicator for configured providers */}
+                  {option.available && (
+                    (option.id === 'orgo' && credentials?.hasOrgoApiKey) ||
+                    (option.id === 'aws' && credentials?.hasAwsCredentials)
+                  ) && (
+                    <div className="absolute top-3 right-3">
+                      <span className="text-[10px] font-mono text-sam-accent bg-sam-accent/10 px-1.5 py-0.5 rounded">
+                        Quick Add
+                      </span>
                     </div>
-                  </motion.div>
-                )}
-              </motion.button>
-            )
-          })}
+                  )}
+                </motion.button>
+              )
+            })}
+          </div>
         </motion.div>
 
-        {/* Continue Button (only show if Orgo is selected) */}
-        {selectedProvider === 'orgo' && isSubmitting && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="flex items-center justify-center gap-3 text-sam-text-dim"
+        {/* Continue Button */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.6, delay: 0.3 }}
+          className="flex items-center justify-center gap-4"
+        >
+          <button
+            onClick={handleContinue}
+            disabled={userVMs.length === 0}
+            className="px-8 py-3 rounded-xl bg-sam-accent text-sam-bg font-medium hover:bg-sam-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
-            <Loader2 className="w-5 h-5 animate-spin text-sam-accent" />
-            <span className="font-mono text-sm">Setting up...</span>
-          </motion.div>
+            Continue to Learning Sources
+            <ArrowRight className="w-5 h-5" />
+          </button>
+        </motion.div>
+        
+        {userVMs.length === 0 && (
+          <p className="text-center text-sm text-sam-text-dim mt-4">
+            Add at least one VM to continue
+          </p>
         )}
       </div>
 
@@ -604,7 +887,9 @@ export default function SelectVMPage() {
               <div className="flex items-center justify-between p-6 border-b border-sam-border">
                 <div className="flex items-center gap-3">
                   <img src="/logos/orgo.png" alt="Orgo" className="w-8 h-8 object-contain" />
-                  <h2 className="text-xl font-display font-semibold text-sam-text">Configure Orgo</h2>
+                  <h2 className="text-xl font-display font-semibold text-sam-text">
+                    {credentials?.hasOrgoApiKey ? 'Add Orgo VM' : 'Configure Orgo'}
+                  </h2>
                 </div>
                 <button
                   onClick={closeOrgoModal}
@@ -628,79 +913,107 @@ export default function SelectVMPage() {
                   </motion.div>
                 )}
 
-                {/* Step 1: API Key */}
+                {/* VM Name */}
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium text-sam-text flex items-center gap-2">
-                      <Key className="w-4 h-4 text-sam-accent" />
-                      Orgo API Key
-                      <span className="text-sam-error">*</span>
-                    </label>
-                    <a
-                      href="https://www.orgo.ai/start"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-sam-accent hover:text-sam-accent/80 flex items-center gap-1"
-                    >
-                      Get API key <ExternalLink className="w-3 h-3" />
-                    </a>
-                  </div>
-                  <div className="flex gap-2">
-                    <input
-                      type="password"
-                      value={orgoApiKey}
-                      onChange={(e) => {
-                        setOrgoApiKey(e.target.value)
-                        setKeyValidated(false)
-                        setOrgoProjects([])
-                        setSelectedProject(null)
-                      }}
-                      placeholder="Enter your Orgo API key"
-                      disabled={keyValidated}
-                      className={`flex-1 px-4 py-2.5 rounded-lg bg-sam-bg border transition-all text-sam-text placeholder:text-sam-text-dim/50 font-mono text-sm ${
-                        keyValidated
-                          ? 'border-green-500/50 bg-green-500/5'
-                          : 'border-sam-border focus:border-sam-accent focus:ring-1 focus:ring-sam-accent/30'
-                      }`}
-                    />
-                    {!keyValidated ? (
-                      <button
-                        onClick={handleValidateApiKey}
-                        disabled={isValidatingKey || !orgoApiKey.trim()}
-                        className="px-4 py-2.5 rounded-lg bg-sam-accent text-sam-bg font-medium text-sm hover:bg-sam-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                      >
-                        {isValidatingKey ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            Validating
-                          </>
-                        ) : (
-                          'Validate'
-                        )}
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => {
-                          setKeyValidated(false)
-                          setOrgoApiKey('')
-                          setOrgoProjects([])
-                          setSelectedProject(null)
-                          setShowCreateProject(false)
-                        }}
-                        className="px-4 py-2.5 rounded-lg border border-sam-border text-sam-text-dim hover:text-sam-text hover:border-sam-accent/50 font-medium text-sm transition-colors flex items-center gap-2"
-                      >
-                        Change
-                      </button>
-                    )}
-                  </div>
-                  {keyValidated && (
-                    <p className="text-xs text-green-400 flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3" /> API key validated successfully
-                    </p>
-                  )}
+                  <label className="text-sm font-medium text-sam-text flex items-center gap-2">
+                    <Server className="w-4 h-4 text-sam-accent" />
+                    VM Name
+                    <span className="text-sam-error">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={orgoVMName}
+                    onChange={(e) => setOrgoVMName(e.target.value)}
+                    placeholder="e.g., My Orgo VM"
+                    className="w-full px-4 py-2.5 rounded-lg bg-sam-bg border border-sam-border focus:border-sam-accent focus:ring-1 focus:ring-sam-accent/30 transition-all text-sam-text placeholder:text-sam-text-dim/50 text-sm"
+                  />
                 </div>
 
-                {/* Step 2: Project Selection (only show after key is validated) */}
+                {/* API Key - only show if not already configured */}
+                {!credentials?.hasOrgoApiKey && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-sm font-medium text-sam-text flex items-center gap-2">
+                        <Key className="w-4 h-4 text-sam-accent" />
+                        Orgo API Key
+                        <span className="text-sam-error">*</span>
+                      </label>
+                      <a
+                        href="https://www.orgo.ai/start"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-sam-accent hover:text-sam-accent/80 flex items-center gap-1"
+                      >
+                        Get API key <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={orgoApiKey}
+                        onChange={(e) => {
+                          setOrgoApiKey(e.target.value)
+                          setKeyValidated(false)
+                          setOrgoProjects([])
+                          setSelectedProject(null)
+                        }}
+                        placeholder="Enter your Orgo API key"
+                        disabled={keyValidated}
+                        className={`flex-1 px-4 py-2.5 rounded-lg bg-sam-bg border transition-all text-sam-text placeholder:text-sam-text-dim/50 font-mono text-sm ${
+                          keyValidated
+                            ? 'border-green-500/50 bg-green-500/5'
+                            : 'border-sam-border focus:border-sam-accent focus:ring-1 focus:ring-sam-accent/30'
+                        }`}
+                      />
+                      {!keyValidated ? (
+                        <button
+                          onClick={handleValidateApiKey}
+                          disabled={isValidatingKey || !orgoApiKey.trim()}
+                          className="px-4 py-2.5 rounded-lg bg-sam-accent text-sam-bg font-medium text-sm hover:bg-sam-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        >
+                          {isValidatingKey ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              Validating
+                            </>
+                          ) : (
+                            'Validate'
+                          )}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setKeyValidated(false)
+                            setOrgoApiKey('')
+                            setOrgoProjects([])
+                            setSelectedProject(null)
+                            setShowCreateProject(false)
+                          }}
+                          className="px-4 py-2.5 rounded-lg border border-sam-border text-sam-text-dim hover:text-sam-text hover:border-sam-accent/50 font-medium text-sm transition-colors flex items-center gap-2"
+                        >
+                          Change
+                        </button>
+                      )}
+                    </div>
+                    {keyValidated && (
+                      <p className="text-xs text-green-400 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> API key validated successfully
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Already configured notice */}
+                {credentials?.hasOrgoApiKey && (
+                  <div className="p-3 rounded-lg bg-green-500/5 border border-green-500/20">
+                    <p className="text-sm text-green-400 flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4" />
+                      Using your saved Orgo API key
+                    </p>
+                  </div>
+                )}
+
+                {/* Project Selection */}
                 {keyValidated && (
                   <motion.div
                     initial={{ opacity: 0, y: 10 }}
@@ -797,18 +1110,18 @@ export default function SelectVMPage() {
                 </button>
                 <button
                   onClick={handleOrgoConfirm}
-                  disabled={!keyValidated || isSubmitting || (orgoProjects.length > 0 && !selectedProject)}
+                  disabled={!keyValidated || isSubmitting || (orgoProjects.length > 0 && !selectedProject) || !orgoVMName.trim()}
                   className="px-5 py-2.5 rounded-lg bg-sam-accent text-sam-bg font-medium text-sm hover:bg-sam-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   {isSubmitting ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      Setting up...
+                      Adding VM...
                     </>
                   ) : (
                     <>
-                      Continue
-                      <ArrowRight className="w-4 h-4" />
+                      Add VM
+                      <Plus className="w-4 h-4" />
                     </>
                   )}
                 </button>
@@ -841,8 +1154,9 @@ export default function SelectVMPage() {
                 <div className="flex items-center gap-3">
                   <img src="/logos/aws.png" alt="AWS" className="w-8 h-8 object-contain" />
                   <div>
-                    <h2 className="text-xl font-display font-semibold text-sam-text">Configure AWS EC2</h2>
-                    <p className="text-xs text-sam-text-dim">No manual AWS Console setup required</p>
+                    <h2 className="text-xl font-display font-semibold text-sam-text">
+                      {credentials?.hasAwsCredentials ? 'Add EC2 VM' : 'Configure AWS EC2'}
+                    </h2>
                   </div>
                 </div>
                 <button
@@ -867,95 +1181,123 @@ export default function SelectVMPage() {
                   </motion.div>
                 )}
 
-                {/* Step 1: AWS Credentials */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium text-sam-text flex items-center gap-2">
-                      <Key className="w-4 h-4 text-sam-accent" />
-                      AWS Credentials
-                      <span className="text-sam-error">*</span>
-                    </label>
-                    <a
-                      href="https://console.aws.amazon.com/iam/home#/security_credentials"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-sam-accent hover:text-sam-accent/80 flex items-center gap-1"
-                    >
-                      Get credentials <ExternalLink className="w-3 h-3" />
-                    </a>
-                  </div>
-
-                  <div className="space-y-3">
-                    <input
-                      type="text"
-                      value={awsAccessKeyId}
-                      onChange={(e) => {
-                        setAwsAccessKeyId(e.target.value)
-                        setAwsKeyValidated(false)
-                      }}
-                      placeholder="Access Key (e.g., AKIAIOSFODNN7EXAMPLE)"
-                      disabled={awsKeyValidated}
-                      className={`w-full px-4 py-2.5 rounded-lg bg-sam-bg border transition-all text-sam-text placeholder:text-sam-text-dim/50 font-mono text-sm ${
-                        awsKeyValidated
-                          ? 'border-green-500/50 bg-green-500/5'
-                          : 'border-sam-border focus:border-sam-accent focus:ring-1 focus:ring-sam-accent/30'
-                      }`}
-                    />
-                    <input
-                      type="password"
-                      value={awsSecretAccessKey}
-                      onChange={(e) => {
-                        setAwsSecretAccessKey(e.target.value)
-                        setAwsKeyValidated(false)
-                      }}
-                      placeholder="Secret Access Key"
-                      disabled={awsKeyValidated}
-                      className={`w-full px-4 py-2.5 rounded-lg bg-sam-bg border transition-all text-sam-text placeholder:text-sam-text-dim/50 font-mono text-sm ${
-                        awsKeyValidated
-                          ? 'border-green-500/50 bg-green-500/5'
-                          : 'border-sam-border focus:border-sam-accent focus:ring-1 focus:ring-sam-accent/30'
-                      }`}
-                    />
-                  </div>
-
-                  <div className="flex gap-2">
-                    {!awsKeyValidated ? (
-                      <button
-                        onClick={handleValidateAWS}
-                        disabled={isValidatingAWS || !awsAccessKeyId.trim() || !awsSecretAccessKey.trim()}
-                        className="flex-1 px-4 py-2.5 rounded-lg bg-sam-accent text-sam-bg font-medium text-sm hover:bg-sam-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                      >
-                        {isValidatingAWS ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            Validating...
-                          </>
-                        ) : (
-                          'Validate Credentials'
-                        )}
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => {
-                          setAwsKeyValidated(false)
-                          setAwsAccessKeyId('')
-                          setAwsSecretAccessKey('')
-                        }}
-                        className="flex-1 px-4 py-2.5 rounded-lg border border-sam-border text-sam-text-dim hover:text-sam-text hover:border-sam-accent/50 font-medium text-sm transition-colors flex items-center justify-center gap-2"
-                      >
-                        Change Credentials
-                      </button>
-                    )}
-                  </div>
-                  
-                  {awsKeyValidated && (
-                    <p className="text-xs text-green-400 flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3" /> AWS credentials validated successfully
-                    </p>
-                  )}
+                {/* VM Name */}
+                <div className="space-y-3">
+                  <label className="text-sm font-medium text-sam-text flex items-center gap-2">
+                    <Server className="w-4 h-4 text-sam-accent" />
+                    VM Name
+                    <span className="text-sam-error">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={awsVMName}
+                    onChange={(e) => setAwsVMName(e.target.value)}
+                    placeholder="e.g., My AWS VM"
+                    className="w-full px-4 py-2.5 rounded-lg bg-sam-bg border border-sam-border focus:border-sam-accent focus:ring-1 focus:ring-sam-accent/30 transition-all text-sam-text placeholder:text-sam-text-dim/50 text-sm"
+                  />
                 </div>
 
-                {/* Step 2: Region & Instance Type Selection (only show after credentials validated) */}
+                {/* AWS Credentials - only show if not already configured */}
+                {!credentials?.hasAwsCredentials && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <label className="text-sm font-medium text-sam-text flex items-center gap-2">
+                        <Key className="w-4 h-4 text-sam-accent" />
+                        AWS Credentials
+                        <span className="text-sam-error">*</span>
+                      </label>
+                      <a
+                        href="https://console.aws.amazon.com/iam/home#/security_credentials"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-sam-accent hover:text-sam-accent/80 flex items-center gap-1"
+                      >
+                        Get credentials <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+
+                    <div className="space-y-3">
+                      <input
+                        type="text"
+                        value={awsAccessKeyId}
+                        onChange={(e) => {
+                          setAwsAccessKeyId(e.target.value)
+                          setAwsKeyValidated(false)
+                        }}
+                        placeholder="Access Key (e.g., AKIAIOSFODNN7EXAMPLE)"
+                        disabled={awsKeyValidated}
+                        className={`w-full px-4 py-2.5 rounded-lg bg-sam-bg border transition-all text-sam-text placeholder:text-sam-text-dim/50 font-mono text-sm ${
+                          awsKeyValidated
+                            ? 'border-green-500/50 bg-green-500/5'
+                            : 'border-sam-border focus:border-sam-accent focus:ring-1 focus:ring-sam-accent/30'
+                        }`}
+                      />
+                      <input
+                        type="password"
+                        value={awsSecretAccessKey}
+                        onChange={(e) => {
+                          setAwsSecretAccessKey(e.target.value)
+                          setAwsKeyValidated(false)
+                        }}
+                        placeholder="Secret Access Key"
+                        disabled={awsKeyValidated}
+                        className={`w-full px-4 py-2.5 rounded-lg bg-sam-bg border transition-all text-sam-text placeholder:text-sam-text-dim/50 font-mono text-sm ${
+                          awsKeyValidated
+                            ? 'border-green-500/50 bg-green-500/5'
+                            : 'border-sam-border focus:border-sam-accent focus:ring-1 focus:ring-sam-accent/30'
+                        }`}
+                      />
+                    </div>
+
+                    <div className="flex gap-2">
+                      {!awsKeyValidated ? (
+                        <button
+                          onClick={handleValidateAWS}
+                          disabled={isValidatingAWS || !awsAccessKeyId.trim() || !awsSecretAccessKey.trim()}
+                          className="flex-1 px-4 py-2.5 rounded-lg bg-sam-accent text-sam-bg font-medium text-sm hover:bg-sam-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        >
+                          {isValidatingAWS ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              Validating...
+                            </>
+                          ) : (
+                            'Validate Credentials'
+                          )}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setAwsKeyValidated(false)
+                            setAwsAccessKeyId('')
+                            setAwsSecretAccessKey('')
+                          }}
+                          className="flex-1 px-4 py-2.5 rounded-lg border border-sam-border text-sam-text-dim hover:text-sam-text hover:border-sam-accent/50 font-medium text-sm transition-colors flex items-center justify-center gap-2"
+                        >
+                          Change Credentials
+                        </button>
+                      )}
+                    </div>
+                    
+                    {awsKeyValidated && (
+                      <p className="text-xs text-green-400 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> AWS credentials validated successfully
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Already configured notice */}
+                {credentials?.hasAwsCredentials && (
+                  <div className="p-3 rounded-lg bg-green-500/5 border border-green-500/20">
+                    <p className="text-sm text-green-400 flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4" />
+                      Using your saved AWS credentials
+                    </p>
+                  </div>
+                )}
+
+                {/* Region & Instance Type Selection */}
                 {awsKeyValidated && (
                   <motion.div
                     initial={{ opacity: 0, y: 10 }}
@@ -994,12 +1336,10 @@ export default function SelectVMPage() {
                       </label>
                       <div className="grid grid-cols-2 gap-2">
                         {(awsInstanceTypes.length > 0 ? awsInstanceTypes : [
-                          // Free Tier eligible (as of 2026)
                           { id: 't3.micro', name: 't3.micro', vcpu: 2, memory: '1 GB', priceHour: 'Free Tier', freeTier: true },
                           { id: 't3.small', name: 't3.small', vcpu: 2, memory: '2 GB', priceHour: 'Free Tier', freeTier: true },
                           { id: 'c7i-flex.large', name: 'c7i-flex.large', vcpu: 2, memory: '4 GB', priceHour: 'Free Tier', freeTier: true },
                           { id: 'm7i-flex.large', name: 'm7i-flex.large', vcpu: 2, memory: '8 GB', priceHour: 'Free Tier', freeTier: true, recommended: true },
-                          // Paid options
                           { id: 't3.medium', name: 't3.medium', vcpu: 2, memory: '4 GB', priceHour: '~$0.04/hr' },
                           { id: 't3.large', name: 't3.large', vcpu: 2, memory: '8 GB', priceHour: '~$0.08/hr' },
                           { id: 't3.xlarge', name: 't3.xlarge', vcpu: 4, memory: '16 GB', priceHour: '~$0.17/hr' },
@@ -1037,37 +1377,6 @@ export default function SelectVMPage() {
                       </div>
                     </div>
 
-                    {/* Existing Instances */}
-                    {awsInstances.length > 0 && (
-                      <div className="space-y-3">
-                        <label className="text-sm font-medium text-sam-text">
-                          Existing Clawdbot Instances
-                        </label>
-                        <div className="space-y-2 max-h-32 overflow-y-auto">
-                          {awsInstances.map((instance) => (
-                            <div
-                              key={instance.id}
-                              className="p-3 rounded-lg border border-sam-border bg-sam-bg/50"
-                            >
-                              <div className="flex items-center justify-between">
-                                <span className="text-sam-text font-medium text-sm">{instance.name}</span>
-                                <span className={`text-xs font-mono px-2 py-0.5 rounded ${
-                                  instance.status === 'running' 
-                                    ? 'bg-green-500/10 text-green-400' 
-                                    : 'bg-yellow-500/10 text-yellow-400'
-                                }`}>
-                                  {instance.status}
-                                </span>
-                              </div>
-                              <div className="text-xs text-sam-text-dim mt-1">
-                                {instance.instanceType} · {instance.publicIp || 'No public IP'}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
                     {/* Permissions Notice */}
                     <div className="p-3 rounded-lg bg-sam-bg border border-sam-border">
                       <p className="text-xs text-sam-text-dim">
@@ -1097,18 +1406,18 @@ export default function SelectVMPage() {
                 </button>
                 <button
                   onClick={handleAWSConfirm}
-                  disabled={!awsKeyValidated || isSubmitting}
+                  disabled={!awsKeyValidated || isSubmitting || !awsVMName.trim()}
                   className="px-5 py-2.5 rounded-lg bg-sam-accent text-sam-bg font-medium text-sm hover:bg-sam-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   {isSubmitting ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      Setting up...
+                      Adding VM...
                     </>
                   ) : (
                     <>
-                      Continue
-                      <ArrowRight className="w-4 h-4" />
+                      Add VM
+                      <Plus className="w-4 h-4" />
                     </>
                   )}
                 </button>

@@ -24,6 +24,55 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    // Check if a specific VM is requested
+    const { searchParams } = new URL(request.url)
+    const vmId = searchParams.get('vmId')
+
+    // If vmId is provided, get status from the VM model
+    if (vmId) {
+      const vm = await prisma.vM.findFirst({
+        where: { id: vmId, userId: session.user.id },
+      })
+
+      if (!vm) {
+        return NextResponse.json({ error: 'VM not found' }, { status: 404 })
+      }
+
+      const response: Record<string, unknown> = {
+        status: vm.status,
+        vmCreated: vm.vmCreated,
+        repoCreated: false, // This is on SetupState
+        repoCloned: vm.repoCloned,
+        gitSyncConfigured: vm.gitSyncConfigured,
+        clawdbotInstalled: vm.clawdbotInstalled,
+        telegramConfigured: false, // This is on SetupState
+        gatewayStarted: vm.gatewayStarted,
+        errorMessage: vm.errorMessage,
+        vmProvider: vm.provider,
+        vmId: vm.id,
+        vmName: vm.name,
+      }
+
+      // Add provider-specific fields
+      if (vm.provider === 'aws') {
+        response.awsInstanceId = vm.awsInstanceId
+        response.awsInstanceType = vm.awsInstanceType
+        response.awsPublicIp = vm.awsPublicIp
+        response.awsRegion = vm.awsRegion
+        if (vm.awsInstanceId && vm.awsRegion) {
+          response.awsConsoleUrl = `https://${vm.awsRegion}.console.aws.amazon.com/ec2/home?region=${vm.awsRegion}#InstanceDetails:instanceId=${vm.awsInstanceId}`
+        }
+      } else if (vm.provider === 'orgo') {
+        response.orgoComputerId = vm.orgoComputerId
+        response.orgoComputerUrl = vm.orgoComputerUrl
+        response.orgoProjectId = vm.orgoProjectId
+        response.orgoProjectName = vm.orgoProjectName
+      }
+
+      return NextResponse.json(response)
+    }
+
+    // Fall back to SetupState for backward compatibility (no vmId provided)
     const setupState = await prisma.setupState.findUnique({
       where: { userId: session.user.id },
     })
@@ -42,16 +91,7 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    // Don't verify computer existence on every status check - this is too aggressive
-    // The screenshot endpoint will handle 404s appropriately
-    // Only trust the database state - if the computer was deleted, the screenshot endpoint
-    // will fail consistently and the frontend can handle that gracefully
-    // This prevents false resets due to transient API issues or rate limiting
-    // 
-    // If you need to verify computer existence, do it explicitly via a separate endpoint
-    // or only when the screenshot endpoint consistently fails with 404
-
-    // Return provider-specific fields
+    // Return provider-specific fields from SetupState
     const response: Record<string, unknown> = {
       status: setupState.status,
       vmCreated: setupState.vmCreated,
@@ -68,18 +108,15 @@ export async function GET(request: NextRequest) {
 
     // Add provider-specific fields
     if (setupState.vmProvider === 'aws') {
-      // Cast to extended type to access AWS fields
       const awsState = setupState as AWSSetupState
       response.awsInstanceId = awsState.awsInstanceId
       response.awsInstanceName = awsState.awsInstanceName
       response.awsPublicIp = awsState.awsPublicIp
       response.awsRegion = awsState.awsRegion
-      // Construct AWS console URL
       if (awsState.awsInstanceId && awsState.awsRegion) {
         response.awsConsoleUrl = `https://${awsState.awsRegion}.console.aws.amazon.com/ec2/home?region=${awsState.awsRegion}#InstanceDetails:instanceId=${awsState.awsInstanceId}`
       }
     } else {
-      // Orgo provider
       response.orgoComputerId = setupState.orgoComputerId
       response.orgoComputerUrl = setupState.orgoComputerUrl
     }

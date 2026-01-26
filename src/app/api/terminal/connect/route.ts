@@ -36,18 +36,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { cols = 80, rows = 24 } = await request.json().catch(() => ({}))
+    const { cols = 80, rows = 24, vmId } = await request.json().catch(() => ({}))
 
-    // Get setup state to find VM connection details
-    const setupState = await prisma.setupState.findUnique({
-      where: { userId: session.user.id },
-    })
+    let vmProvider: string
+    let awsPublicIp: string | null = null
+    let awsPrivateKey: string | null = null
 
-    if (!setupState) {
-      return NextResponse.json({ error: 'No VM configured' }, { status: 404 })
+    // If vmId is provided, look up the VM from the VM model (multi-VM support)
+    if (vmId) {
+      const vm = await prisma.vM.findFirst({
+        where: { id: vmId, userId: session.user.id },
+      })
+
+      if (!vm) {
+        return NextResponse.json({ error: 'VM not found' }, { status: 404 })
+      }
+
+      vmProvider = vm.provider
+      awsPublicIp = vm.awsPublicIp
+      awsPrivateKey = vm.awsPrivateKey
+    } else {
+      // Fall back to SetupState for backward compatibility
+      const setupState = await prisma.setupState.findUnique({
+        where: { userId: session.user.id },
+      })
+
+      if (!setupState) {
+        return NextResponse.json({ error: 'No VM configured' }, { status: 404 })
+      }
+
+      vmProvider = setupState.vmProvider || 'orgo'
+      const awsState = setupState as AWSSetupState
+      awsPublicIp = awsState.awsPublicIp || null
+      awsPrivateKey = awsState.awsPrivateKey || null
     }
-
-    const vmProvider = setupState.vmProvider || 'orgo'
 
     // Clean up any existing sessions for this user
     const sessionManager = getSessionManager()
@@ -66,9 +88,7 @@ export async function POST(request: NextRequest) {
     let sshConfig: SSHConfig
 
     if (vmProvider === 'aws') {
-      const awsState = setupState as AWSSetupState
-      
-      if (!awsState.awsPublicIp || !awsState.awsPrivateKey) {
+      if (!awsPublicIp || !awsPrivateKey) {
         return NextResponse.json(
           { error: 'AWS instance not fully configured' },
           { status: 400 }
@@ -78,10 +98,10 @@ export async function POST(request: NextRequest) {
       sshConfig = {
         sessionId,
         provider: 'aws',
-        host: awsState.awsPublicIp,
+        host: awsPublicIp,
         port: 22,
         username: 'ubuntu',
-        privateKey: awsState.awsPrivateKey,
+        privateKey: awsPrivateKey,
         cols,
         rows,
       }

@@ -45,6 +45,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ 
       success: true,
       message: 'Project selected successfully',
+      project: { id: projectId, name: projectName },
     })
 
   } catch (error) {

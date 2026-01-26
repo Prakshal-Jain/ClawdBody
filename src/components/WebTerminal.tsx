@@ -8,6 +8,8 @@ import '@xterm/xterm/css/xterm.css'
 import { Loader2, Terminal, RefreshCw, Power, Maximize2, Minimize2 } from 'lucide-react'
 
 interface WebTerminalProps {
+  /** VM ID to connect to (for multi-VM support) */
+  vmId?: string
   /** Callback when terminal is ready */
   onReady?: () => void
   /** Callback when terminal disconnects */
@@ -23,6 +25,7 @@ interface WebTerminalProps {
 type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
 
 export function WebTerminal({
+  vmId,
   onReady,
   onDisconnect,
   autoConnect = true, // Auto-connect by default for better UX
@@ -154,7 +157,7 @@ export function WebTerminal({
       const response = await fetch('/api/terminal/connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cols, rows }),
+        body: JSON.stringify({ cols, rows, vmId }),
       })
 
       if (!response.ok) {
@@ -230,7 +233,7 @@ export function WebTerminal({
         setError(err instanceof Error ? err.message : 'Failed to connect')
       }
     }
-  }, [connectionState, onReady])
+  }, [connectionState, onReady, vmId])
 
   // Disconnect from terminal
   const disconnect = useCallback(async () => {
@@ -315,7 +318,9 @@ export function WebTerminal({
     term.loadAddon(webLinksAddon)
 
     term.open(terminalRef.current)
-    fitAddon.fit()
+    
+    // Delay initial fit to ensure container is properly sized
+    setTimeout(() => fitAddon.fit(), 0)
 
     // Handle input - use ref to avoid stale closures
     term.onData((data) => {
@@ -332,9 +337,17 @@ export function WebTerminal({
     }
     window.addEventListener('resize', handleResize)
 
+    // Use ResizeObserver to handle container size changes
+    const resizeObserver = new ResizeObserver(() => {
+      fitAddon.fit()
+      resizeTerminalRef.current()
+    })
+    resizeObserver.observe(terminalRef.current)
+
     return () => {
       console.log('[WebTerminal] Cleaning up')
       window.removeEventListener('resize', handleResize)
+      resizeObserver.disconnect()
       term.dispose()
       xtermRef.current = null
       fitAddonRef.current = null
@@ -427,12 +440,11 @@ export function WebTerminal({
       </div>
 
       {/* Terminal Content */}
-      <div className="flex-1 relative">
+      <div className="flex-1 relative min-h-0 overflow-hidden">
         {/* xterm container - click to focus */}
         <div
           ref={terminalRef}
-          className="absolute inset-0 p-2 cursor-text"
-          style={{ minHeight: '300px' }}
+          className="absolute inset-2 cursor-text overflow-hidden"
           onClick={() => xtermRef.current?.focus()}
         />
 

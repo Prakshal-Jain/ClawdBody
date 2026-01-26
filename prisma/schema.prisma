@@ -44,6 +44,7 @@ model User {
   sessions      Session[]
   setup         SetupState?
   integrations  Integration[]
+  vms           VM[]
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 }
@@ -62,10 +63,10 @@ model SetupState {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // Setup progress
-  status String @default("pending") // pending, github_connected, collecting_keys, provisioning, configuring_vm, ready, failed
+  status String @default("pending") // pending, provisioning, configuring_vm, ready, failed
 
   // VM Provider selection
-  vmProvider String? // orgo, flyio, aws
+  vmProvider String? // orgo, aws, flyio
 
   // API Keys (encrypted in production)
   claudeApiKey String?
@@ -74,8 +75,8 @@ model SetupState {
   // AWS Credentials (encrypted in production)
   awsAccessKeyId     String?
   awsSecretAccessKey String?
-  awsRegion          String?  // Default: us-east-1
-  awsInstanceType    String?  // Default: t3.medium
+  awsRegion          String? @default("us-east-1")
+  awsInstanceType    String? @default("t3.micro")
 
   // Orgo VM info
   orgoProjectId   String?
@@ -85,28 +86,73 @@ model SetupState {
   vmStatus        String? // creating, starting, running, stopped
 
   // AWS EC2 instance info
-  awsInstanceId     String?
-  awsInstanceName   String?
-  awsPublicIp       String?
-  awsPrivateKey     String?  // SSH private key for the instance
+  awsInstanceId   String?
+  awsInstanceName String?
+  awsPublicIp     String?
+  awsPrivateKey   String?
 
   // GitHub vault repo
   vaultRepoName String?
   vaultRepoUrl  String?
 
   // Setup steps completed
-  vmCreated           Boolean @default(false)
-  repoCreated         Boolean @default(false)
-  repoCloned          Boolean @default(false)
-  gitSyncConfigured   Boolean @default(false)
-  clawdbotInstalled   Boolean @default(false)
-  telegramConfigured  Boolean @default(false)
-  gatewayStarted      Boolean @default(false)
+  vmCreated          Boolean @default(false)
+  repoCreated        Boolean @default(false)
+  repoCloned         Boolean @default(false)
+  gitSyncConfigured  Boolean @default(false)
+  clawdbotInstalled  Boolean @default(false)
+  telegramConfigured Boolean @default(false)
+  gatewayStarted     Boolean @default(false)
 
   errorMessage String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model VM {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // VM Info
+  name     String
+  provider String  // orgo, aws, flyio, etc.
+  status   String  @default("pending") // pending, creating, running, stopped, error
+
+  // Orgo specific fields
+  orgoProjectId   String?
+  orgoProjectName String?
+  orgoComputerId  String?
+  orgoComputerUrl String?
+
+  // AWS specific fields
+  awsInstanceId   String?
+  awsInstanceName String?
+  awsInstanceType String?
+  awsRegion       String?
+  awsPublicIp     String?
+  awsPrivateKey   String?
+
+  // SSH connection info
+  sshHost     String?
+  sshPort     Int?     @default(22)
+  sshUser     String?
+  sshKeyPath  String?
+
+  // Setup state for this VM
+  vmCreated          Boolean @default(false)
+  repoCloned         Boolean @default(false)
+  gitSyncConfigured  Boolean @default(false)
+  clawdbotInstalled  Boolean @default(false)
+  gatewayStarted     Boolean @default(false)
+
+  errorMessage String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }
 
 model Integration {

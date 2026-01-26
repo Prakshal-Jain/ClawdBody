@@ -60,6 +60,7 @@ export async function POST(request: NextRequest) {
         data: {
           orgoProjectId: newProject.id,
           orgoProjectName: newProject.name,
+          vmProvider: 'orgo',
         },
       })
 
@@ -76,6 +77,7 @@ export async function POST(request: NextRequest) {
         where: { userId: session.user.id },
         data: {
           orgoProjectName: projectName,
+          vmProvider: 'orgo',
         },
       })
 

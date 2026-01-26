@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useSession, signOut } from 'next-auth/react'
 import { motion } from 'framer-motion'
-import { Mail, Calendar, MessageSquare, FileText, MessageCircle, Bot, Video, Phone, Loader2, RefreshCw, Check, Key, AlertCircle, ArrowRight, ExternalLink, LogOut, Github, X, Server, GitBranch, Terminal, CheckCircle2, ChevronDown, ChevronUp, Trash2, XCircle } from 'lucide-react'
+import { Mail, Calendar, MessageSquare, FileText, MessageCircle, Bot, Video, Phone, Loader2, RefreshCw, Check, Key, AlertCircle, ArrowRight, ExternalLink, LogOut, Github, X, Server, GitBranch, Terminal, CheckCircle2, ChevronDown, ChevronUp, Trash2, XCircle, Monitor } from 'lucide-react'
 import { WebTerminal } from '@/components/WebTerminal'
 
 interface Connector {
@@ -122,6 +122,21 @@ interface SetupStatus {
   vmProvider?: string
 }
 
+interface VMInfo {
+  id: string
+  name: string
+  provider: string
+  status: string
+  orgoProjectId?: string
+  orgoProjectName?: string
+  orgoComputerId?: string
+  orgoComputerUrl?: string
+  awsInstanceId?: string
+  awsInstanceType?: string
+  awsRegion?: string
+  awsPublicIp?: string
+}
+
 // Memory density weights for each source (out of 100 total)
 // Weights are balanced so connecting all available sources approaches 100%
 // The three core sources (Gmail, Calendar, GitHub) total 50% to leave room for other sources
@@ -218,6 +233,39 @@ export default function LearningSourcesPage() {
   const [isLoadingStatus, setIsLoadingStatus] = useState(true) // Track if we're still loading initial status
   const [isCheckingRedirect, setIsCheckingRedirect] = useState(true) // Track if we're checking for redirect
   const [connectedSources, setConnectedSources] = useState<Set<string>>(new Set())
+  const [currentVM, setCurrentVM] = useState<VMInfo | null>(null)
+  const [allVMs, setAllVMs] = useState<VMInfo[]>([])
+  
+  // Get vmId from URL params
+  const vmId = searchParams?.get('vmId')
+
+  // Fetch VMs and set current VM
+  const fetchVMs = useCallback(async () => {
+    try {
+      const response = await fetch('/api/vms')
+      if (response.ok) {
+        const data = await response.json()
+        setAllVMs(data.vms || [])
+        
+        // If vmId is provided, find that VM
+        if (vmId && data.vms) {
+          const vm = data.vms.find((v: VMInfo) => v.id === vmId)
+          if (vm) {
+            setCurrentVM(vm)
+          }
+        } else if (data.vms && data.vms.length > 0) {
+          // Default to first VM if no vmId specified
+          setCurrentVM(data.vms[0])
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch VMs:', error)
+    }
+  }, [vmId])
+
+  useEffect(() => {
+    fetchVMs()
+  }, [fetchVMs])
 
   // Fetch integration status for memory density
   const fetchIntegrationStatus = useCallback(async () => {
@@ -279,7 +327,8 @@ export default function LearningSourcesPage() {
   useEffect(() => {
     const checkInitialStatus = async () => {
       try {
-        const res = await fetch('/api/setup/status')
+        const statusUrl = vmId ? `/api/setup/status?vmId=${vmId}` : '/api/setup/status'
+        const res = await fetch(statusUrl)
         if (res.ok) {
           const status: SetupStatus = await res.json()
           setSetupStatus(prevStatus => {
@@ -323,17 +372,37 @@ export default function LearningSourcesPage() {
   useEffect(() => {
     const checkStatusImmediately = async () => {
       try {
-        const res = await fetch('/api/setup/status')
-        if (res.ok) {
-          const status: SetupStatus = await res.json()
-          setSetupStatus(status)
+        // First check if user has any VMs
+        const vmsRes = await fetch('/api/vms')
+        if (vmsRes.ok) {
+          const vmsData = await vmsRes.json()
           
-          // Redirect to select-vm if user hasn't selected a VM provider and doesn't have a VM set up
-          // Only redirect if they're truly starting fresh (pending status and no VM)
-          if (!status.vmProvider && !status.vmCreated) {
+          // Redirect to select-vm if user has no VMs
+          if (!vmsData.vms || vmsData.vms.length === 0) {
             router.push('/select-vm')
             return // Don't set loading states, just redirect
           }
+          
+          // Update VM state
+          setAllVMs(vmsData.vms)
+          if (vmId) {
+            const vm = vmsData.vms.find((v: VMInfo) => v.id === vmId)
+            if (vm) {
+              setCurrentVM(vm)
+            } else {
+              // If vmId not found, use first VM
+              setCurrentVM(vmsData.vms[0])
+            }
+          } else {
+            setCurrentVM(vmsData.vms[0])
+          }
+        }
+        
+        const statusUrl = vmId ? `/api/setup/status?vmId=${vmId}` : '/api/setup/status'
+        const res = await fetch(statusUrl)
+        if (res.ok) {
+          const status: SetupStatus = await res.json()
+          setSetupStatus(status)
           
           // Only set loading states if we're not redirecting
           setIsLoadingStatus(false)
@@ -358,7 +427,7 @@ export default function LearningSourcesPage() {
       }
     }
     checkStatusImmediately()
-  }, [router])
+  }, [router, vmId])
 
   // Poll setup status when progress is shown
   useEffect(() => {
@@ -370,7 +439,8 @@ export default function LearningSourcesPage() {
       if (shouldStop) return
       
       try {
-        const res = await fetch('/api/setup/status')
+        const statusUrl = vmId ? `/api/setup/status?vmId=${vmId}` : '/api/setup/status'
+        const res = await fetch(statusUrl)
         if (res.ok) {
           const status: SetupStatus = await res.json()
           
@@ -444,6 +514,7 @@ export default function LearningSourcesPage() {
           claudeApiKey,
           telegramBotToken: telegramBotToken.trim() || undefined,
           telegramUserId: telegramUserId.trim() || undefined,
+          vmId, // Pass vmId so the backend updates the correct VM
         })
       })
 
@@ -501,16 +572,40 @@ export default function LearningSourcesPage() {
               </span>
             )}
           </motion.div>
-          <motion.button
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.6 }}
-            onClick={() => signOut({ callbackUrl: '/' })}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-sam-border hover:border-sam-error/50 text-sam-text-dim hover:text-sam-error transition-all"
-          >
-            <LogOut className="w-4 h-4" />
-            <span className="text-sm font-mono">Sign out</span>
-          </motion.button>
+          <div className="flex items-center gap-3">
+            {/* VM Selector - simple text showing current VM */}
+            {allVMs.length > 0 && currentVM && (
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.6 }}
+                className="flex items-center gap-2 px-3 py-2 text-sm text-sam-text-dim"
+              >
+                <span className="text-sam-text font-medium">{currentVM.name}</span>
+                <span className="text-sam-text-dim">({currentVM.provider})</span>
+              </motion.div>
+            )}
+            <motion.button
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.6, delay: 0.05 }}
+              onClick={() => router.push('/select-vm')}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg border border-sam-border hover:border-sam-accent/50 text-sam-text-dim hover:text-sam-accent transition-all"
+            >
+              <Monitor className="w-4 h-4" />
+              <span className="text-sm font-mono">Manage VMs</span>
+            </motion.button>
+            <motion.button
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.6, delay: 0.1 }}
+              onClick={() => signOut({ callbackUrl: '/' })}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg border border-sam-border hover:border-sam-error/50 text-sam-text-dim hover:text-sam-error transition-all"
+            >
+              <LogOut className="w-4 h-4" />
+              <span className="text-sm font-mono">Sign out</span>
+            </motion.button>
+          </div>
         </div>
 
         {/* Setup Progress or API Keys Section */}
@@ -531,6 +626,7 @@ export default function LearningSourcesPage() {
             <SetupProgressView 
               setupStatus={setupStatus} 
               logs={setupLogs}
+              vmId={vmId}
               onReset={() => {
                 setShowSetupProgress(false)
                 setSetupStatus(null)
@@ -540,9 +636,11 @@ export default function LearningSourcesPage() {
           ) : setupStatus?.status === 'ready' && (setupStatus?.orgoComputerId || setupStatus?.awsInstanceId) ? (
             <ComputerConnectedView 
               setupStatus={setupStatus}
+              vmId={vmId}
               onStatusUpdate={async () => {
                 // Refresh status
-                const res = await fetch('/api/setup/status')
+                const statusUrl = vmId ? `/api/setup/status?vmId=${vmId}` : '/api/setup/status'
+                const res = await fetch(statusUrl)
                 if (res.ok) {
                   const newStatus = await res.json()
                   setSetupStatus(newStatus)
@@ -1149,11 +1247,13 @@ function ConnectorCard({ connector, index, onConnect }: { connector: Connector; 
 function SetupProgressView({ 
   setupStatus, 
   logs,
-  onReset 
+  onReset,
+  vmId 
 }: { 
   setupStatus: SetupStatus | null
   logs: Array<{ time: Date; message: string; type: 'info' | 'success' | 'error' }>
   onReset: () => void
+  vmId?: string | null
 }) {
   const [currentScreenshot, setCurrentScreenshot] = useState<string | null>(null)
   const [isProgressCollapsed, setIsProgressCollapsed] = useState(false)
@@ -1166,7 +1266,8 @@ function SetupProgressView({
 
     const fetchScreenshot = async () => {
       try {
-        const res = await fetch('/api/setup/screenshot')
+        const screenshotUrl = vmId ? `/api/setup/screenshot?vmId=${vmId}` : '/api/setup/screenshot'
+        const res = await fetch(screenshotUrl)
         if (res.ok) {
           const data = await res.json()
           // Handle both base64 image and image URL
@@ -1495,11 +1596,13 @@ function SetupProgressView({
 function ComputerConnectedView({ 
   setupStatus, 
   onStatusUpdate,
-  onDelete 
+  onDelete,
+  vmId 
 }: { 
   setupStatus: SetupStatus
   onStatusUpdate?: () => Promise<void>
   onDelete: () => Promise<void>
+  vmId?: string | null
 }) {
   const [isDeleting, setIsDeleting] = useState(false)
   const [currentScreenshot, setCurrentScreenshot] = useState<string | null>(null)
@@ -1529,7 +1632,8 @@ function ComputerConnectedView({
 
     const fetchScreenshot = async () => {
       try {
-        const res = await fetch('/api/setup/screenshot')
+        const screenshotUrl = vmId ? `/api/setup/screenshot?vmId=${vmId}` : '/api/setup/screenshot'
+        const res = await fetch(screenshotUrl)
         if (res.ok) {
           const data = await res.json()
           // Reset 404 counter on success
@@ -1657,6 +1761,7 @@ function ComputerConnectedView({
           {/* AWS: Interactive Web Terminal */}
           {setupStatus?.vmProvider === 'aws' && setupStatus?.awsPublicIp ? (
             <WebTerminal
+              vmId={vmId || undefined}
               title={`ubuntu@${setupStatus.awsPublicIp}`}
               autoConnect={true}
               className="w-full h-full"

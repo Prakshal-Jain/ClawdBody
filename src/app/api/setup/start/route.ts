@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { claudeApiKey, telegramBotToken, telegramUserId } = await request.json()
+    const { claudeApiKey, telegramBotToken, telegramUserId, vmId } = await request.json()
 
     if (!claudeApiKey) {
       return NextResponse.json({ error: 'Claude API key is required' }, { status: 400 })
@@ -29,7 +29,19 @@ export async function POST(request: NextRequest) {
       where: { userId: session.user.id },
     })
 
-    const vmProvider = setupState?.vmProvider || 'orgo'
+    // If vmId is provided, get the VM to determine provider
+    let vm = null
+    if (vmId) {
+      vm = await prisma.vM.findFirst({
+        where: { id: vmId, userId: session.user.id },
+      })
+      if (!vm) {
+        return NextResponse.json({ error: 'VM not found' }, { status: 404 })
+      }
+    }
+
+    // Use VM provider if available, otherwise fall back to setupState
+    const vmProvider = vm?.provider || setupState?.vmProvider || 'orgo'
 
     // Validate provider-specific configuration
     if (vmProvider === 'orgo') {
@@ -82,6 +94,22 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    // If vmId is provided, also update the VM model status
+    if (vmId && vm) {
+      await prisma.vM.update({
+        where: { id: vmId },
+        data: {
+          status: 'provisioning',
+          errorMessage: null,
+          vmCreated: false,
+          repoCloned: false,
+          gitSyncConfigured: false,
+          clawdbotInstalled: false,
+          gatewayStarted: false,
+        },
+      })
+    }
+
     // Start async setup process based on provider
     if (vmProvider === 'aws') {
       // Type assertion to access AWS fields
@@ -97,18 +125,20 @@ export async function POST(request: NextRequest) {
         awsState.awsAccessKeyId!,
         awsState.awsSecretAccessKey!,
         awsState.awsRegion || 'us-east-1',
-        awsState.awsInstanceType || 't3.micro',
+        vm?.awsInstanceType || awsState.awsInstanceType || 't3.micro',
         telegramBotToken,
-        telegramUserId
+        telegramUserId,
+        vmId // Pass vmId
       ).catch(console.error)
     } else {
       runSetupProcess(
         session.user.id,
         claudeApiKey,
         setupState.orgoApiKey!,
-        setupState.orgoProjectName || 'claude-brain',
+        vm?.orgoProjectName || setupState.orgoProjectName || 'claude-brain',
         telegramBotToken,
-        telegramUserId
+        telegramUserId,
+        vmId // Pass vmId
       ).catch(console.error)
     }
 
@@ -134,7 +164,8 @@ async function runSetupProcess(
   orgoApiKey: string,
   projectName: string,
   telegramBotToken?: string,
-  telegramUserId?: string
+  telegramUserId?: string,
+  vmId?: string
 ) {
   const updateStatus = async (updates: Partial<{
     status: string
@@ -153,10 +184,33 @@ async function runSetupProcess(
     vmStatus: string
     errorMessage: string
   }>) => {
+    // Update SetupState
     await prisma.setupState.update({
       where: { userId },
       data: updates,
     })
+    
+    // Also update VM model if vmId is provided
+    if (vmId) {
+      const vmUpdates: Record<string, unknown> = {}
+      if (updates.status !== undefined) vmUpdates.status = updates.status
+      if (updates.vmCreated !== undefined) vmUpdates.vmCreated = updates.vmCreated
+      if (updates.repoCloned !== undefined) vmUpdates.repoCloned = updates.repoCloned
+      if (updates.gitSyncConfigured !== undefined) vmUpdates.gitSyncConfigured = updates.gitSyncConfigured
+      if (updates.clawdbotInstalled !== undefined) vmUpdates.clawdbotInstalled = updates.clawdbotInstalled
+      if (updates.gatewayStarted !== undefined) vmUpdates.gatewayStarted = updates.gatewayStarted
+      if (updates.orgoProjectId !== undefined) vmUpdates.orgoProjectId = updates.orgoProjectId
+      if (updates.orgoComputerId !== undefined) vmUpdates.orgoComputerId = updates.orgoComputerId
+      if (updates.orgoComputerUrl !== undefined) vmUpdates.orgoComputerUrl = updates.orgoComputerUrl
+      if (updates.errorMessage !== undefined) vmUpdates.errorMessage = updates.errorMessage
+      
+      if (Object.keys(vmUpdates).length > 0) {
+        await prisma.vM.update({
+          where: { id: vmId },
+          data: vmUpdates,
+        })
+      }
+    }
   }
 
   try {
@@ -216,7 +270,7 @@ async function runSetupProcess(
         const projectIdOrName = project.id || project.name
         computer = await orgoClient.createComputer(projectIdOrName, computerName, {
           os: 'linux',
-          ram: 8,
+          ram: 4,
           cpu: 2,
         })
         
@@ -567,7 +621,8 @@ async function runAWSSetupProcess(
   awsRegion: string,
   awsInstanceType: string,
   telegramBotToken?: string,
-  telegramUserId?: string
+  telegramUserId?: string,
+  vmId?: string
 ) {
   const updateStatus = async (updates: Partial<{
     status: string
@@ -587,10 +642,34 @@ async function runAWSSetupProcess(
     vmStatus: string
     errorMessage: string
   }>) => {
+    // Update SetupState
     await prisma.setupState.update({
       where: { userId },
       data: updates,
     })
+    
+    // Also update VM model if vmId is provided
+    if (vmId) {
+      const vmUpdates: Record<string, unknown> = {}
+      if (updates.status !== undefined) vmUpdates.status = updates.status
+      if (updates.vmCreated !== undefined) vmUpdates.vmCreated = updates.vmCreated
+      if (updates.repoCloned !== undefined) vmUpdates.repoCloned = updates.repoCloned
+      if (updates.gitSyncConfigured !== undefined) vmUpdates.gitSyncConfigured = updates.gitSyncConfigured
+      if (updates.clawdbotInstalled !== undefined) vmUpdates.clawdbotInstalled = updates.clawdbotInstalled
+      if (updates.gatewayStarted !== undefined) vmUpdates.gatewayStarted = updates.gatewayStarted
+      if (updates.awsInstanceId !== undefined) vmUpdates.awsInstanceId = updates.awsInstanceId
+      if (updates.awsInstanceName !== undefined) vmUpdates.awsInstanceName = updates.awsInstanceName
+      if (updates.awsPublicIp !== undefined) vmUpdates.awsPublicIp = updates.awsPublicIp
+      if (updates.awsPrivateKey !== undefined) vmUpdates.awsPrivateKey = updates.awsPrivateKey
+      if (updates.errorMessage !== undefined) vmUpdates.errorMessage = updates.errorMessage
+      
+      if (Object.keys(vmUpdates).length > 0) {
+        await prisma.vM.update({
+          where: { id: vmId },
+          data: vmUpdates,
+        })
+      }
+    }
   }
 
   let awsVMSetup: AWSVMSetup | null = null

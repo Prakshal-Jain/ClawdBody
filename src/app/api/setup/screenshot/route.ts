@@ -11,17 +11,46 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Get setup state to find computer ID
-    const setupState = await prisma.setupState.findUnique({
-      where: { userId: session.user.id },
-    })
+    // Check if a specific VM is requested
+    const { searchParams } = new URL(request.url)
+    const vmId = searchParams.get('vmId')
 
-    if (!setupState?.orgoComputerId) {
+    let orgoComputerId: string | null = null
+
+    // If vmId is provided, get the computer ID from the VM model
+    if (vmId) {
+      const vm = await prisma.vM.findFirst({
+        where: { id: vmId, userId: session.user.id },
+      })
+
+      if (!vm) {
+        return NextResponse.json({ error: 'VM not found' }, { status: 404 })
+      }
+
+      if (vm.provider !== 'orgo') {
+        return NextResponse.json({ error: 'Screenshot only available for Orgo VMs' }, { status: 400 })
+      }
+
+      orgoComputerId = vm.orgoComputerId
+    } else {
+      // Fall back to SetupState for backward compatibility
+      const setupState = await prisma.setupState.findUnique({
+        where: { userId: session.user.id },
+      })
+      orgoComputerId = setupState?.orgoComputerId || null
+    }
+
+    if (!orgoComputerId) {
       return NextResponse.json({ error: 'VM not created yet' }, { status: 404 })
     }
 
-    // Get Orgo API key from environment
-    const orgoApiKey = process.env.ORGO_API_KEY
+    // Get Orgo API key from setup state or environment
+    const setupState = await prisma.setupState.findUnique({
+      where: { userId: session.user.id },
+      select: { orgoApiKey: true },
+    })
+    
+    const orgoApiKey = setupState?.orgoApiKey || process.env.ORGO_API_KEY
     if (!orgoApiKey) {
       return NextResponse.json({ error: 'Orgo API key not configured' }, { status: 500 })
     }
@@ -35,7 +64,7 @@ export async function GET(request: NextRequest) {
     
     try {
       const response = await fetch(
-        `${ORGO_API_BASE}/computers/${setupState.orgoComputerId}/screenshot`,
+        `${ORGO_API_BASE}/computers/${orgoComputerId}/screenshot`,
         {
           signal: controller.signal,
           headers: {

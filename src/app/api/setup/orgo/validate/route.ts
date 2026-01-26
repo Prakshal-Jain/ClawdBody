@@ -16,32 +16,48 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { apiKey } = await request.json()
+    const { apiKey, useStored } = await request.json()
 
-    if (!apiKey || typeof apiKey !== 'string') {
+    let keyToUse = apiKey
+
+    // If useStored is true, fetch the stored API key
+    if (useStored) {
+      const setupState = await prisma.setupState.findUnique({
+        where: { userId: session.user.id },
+        select: { orgoApiKey: true },
+      })
+      
+      if (!setupState?.orgoApiKey) {
+        return NextResponse.json({ error: 'No stored Orgo API key found' }, { status: 400 })
+      }
+      
+      keyToUse = setupState.orgoApiKey
+    }
+
+    if (!keyToUse || typeof keyToUse !== 'string') {
       return NextResponse.json({ error: 'Orgo API key is required' }, { status: 400 })
     }
 
     // Validate the API key by trying to list projects
-    const orgoClient = new OrgoClient(apiKey)
+    const orgoClient = new OrgoClient(keyToUse)
     
     try {
       const projects = await orgoClient.listProjects()
       
-      // Store the API key in setup state
-      await prisma.setupState.upsert({
-        where: { userId: session.user.id },
-        create: {
-          userId: session.user.id,
-          orgoApiKey: apiKey,
-          vmProvider: 'orgo',
-          status: 'pending',
-        },
-        update: {
-          orgoApiKey: apiKey,
-          vmProvider: 'orgo',
-        },
-      })
+      // Store the API key in setup state (only if it's a new key)
+      if (!useStored) {
+        await prisma.setupState.upsert({
+          where: { userId: session.user.id },
+          create: {
+            userId: session.user.id,
+            orgoApiKey: keyToUse,
+            status: 'pending',
+          },
+          update: {
+            orgoApiKey: keyToUse,
+          },
+        })
+      }
 
       return NextResponse.json({ 
         success: true,

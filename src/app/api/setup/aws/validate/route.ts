@@ -12,17 +12,41 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { accessKeyId, secretAccessKey, region } = await request.json()
+    const { accessKeyId, secretAccessKey, region, useStored } = await request.json()
 
-    if (!accessKeyId || !secretAccessKey) {
+    let keyId = accessKeyId
+    let secretKey = secretAccessKey
+    let regionToUse = region || 'us-east-1'
+
+    // If useStored is true, fetch the stored credentials
+    if (useStored) {
+      const setupState = await prisma.setupState.findUnique({
+        where: { userId: session.user.id },
+        select: { 
+          awsAccessKeyId: true, 
+          awsSecretAccessKey: true,
+          awsRegion: true,
+        },
+      })
+      
+      if (!setupState?.awsAccessKeyId || !setupState?.awsSecretAccessKey) {
+        return NextResponse.json({ error: 'No stored AWS credentials found' }, { status: 400 })
+      }
+      
+      keyId = setupState.awsAccessKeyId
+      secretKey = setupState.awsSecretAccessKey
+      regionToUse = setupState.awsRegion || 'us-east-1'
+    }
+
+    if (!keyId || !secretKey) {
       return NextResponse.json({ error: 'AWS credentials are required' }, { status: 400 })
     }
 
     // Initialize AWS client
     const awsClient = new AWSClient({
-      accessKeyId,
-      secretAccessKey,
-      region: region || 'us-east-1',
+      accessKeyId: keyId,
+      secretAccessKey: secretKey,
+      region: regionToUse,
     })
 
     // Validate credentials
@@ -37,24 +61,24 @@ export async function POST(request: NextRequest) {
     // List existing Clawdbot instances
     const instances = await awsClient.listInstances()
 
-    // Store credentials in setup state
-    await prisma.setupState.upsert({
-      where: { userId: session.user.id },
-      update: {
-        vmProvider: 'aws',
-        awsAccessKeyId: accessKeyId,
-        awsSecretAccessKey: secretAccessKey,
-        awsRegion: region || 'us-east-1',
-      },
-      create: {
-        userId: session.user.id,
-        vmProvider: 'aws',
-        awsAccessKeyId: accessKeyId,
-        awsSecretAccessKey: secretAccessKey,
-        awsRegion: region || 'us-east-1',
-        status: 'pending',
-      },
-    })
+    // Store credentials in setup state (only if new credentials were provided)
+    if (!useStored) {
+      await prisma.setupState.upsert({
+        where: { userId: session.user.id },
+        update: {
+          awsAccessKeyId: keyId,
+          awsSecretAccessKey: secretKey,
+          awsRegion: regionToUse,
+        },
+        create: {
+          userId: session.user.id,
+          awsAccessKeyId: keyId,
+          awsSecretAccessKey: secretKey,
+          awsRegion: regionToUse,
+          status: 'pending',
+        },
+      })
+    }
 
     return NextResponse.json({
       success: true,
