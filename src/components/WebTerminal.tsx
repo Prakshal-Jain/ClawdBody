@@ -38,6 +38,9 @@ export function WebTerminal({
   const hasConnectedRef = useRef(false) // Track if we've ever connected
   const sendInputRef = useRef<(data: string) => void>(() => {}) // Ref for sendInput callback
   const resizeTerminalRef = useRef<() => void>(() => {}) // Ref for resize callback
+  const retryCountRef = useRef(0) // Track retry attempts
+  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const MAX_RETRIES = 3
   
   // Input batching - collect keystrokes and send together
   const inputBufferRef = useRef<string>('')
@@ -46,6 +49,7 @@ export function WebTerminal({
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected')
   const [error, setError] = useState<string | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [retryCount, setRetryCount] = useState(0)
 
   // Flush batched input to server
   const flushInput = useCallback(async () => {
@@ -117,17 +121,29 @@ export function WebTerminal({
   // Keep ref updated
   resizeTerminalRef.current = resizeTerminal
 
-  // Connect to terminal
-  const connect = useCallback(async () => {
+  // Connect to terminal with auto-retry
+  const connect = useCallback(async (isRetry = false) => {
     // Guard against duplicate connections
     if (isConnectingRef.current || connectionState === 'connected') {
       console.log('[WebTerminal] Skipping duplicate connect call')
       return
     }
 
+    // Reset retry count on fresh connect (not a retry)
+    if (!isRetry) {
+      retryCountRef.current = 0
+      setRetryCount(0)
+    }
+
     isConnectingRef.current = true
     setConnectionState('connecting')
     setError(null)
+
+    // Clean up any existing event source
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close()
+      eventSourceRef.current = null
+    }
 
     try {
       // Get terminal dimensions
@@ -149,6 +165,8 @@ export function WebTerminal({
       const { sessionId } = await response.json()
       sessionIdRef.current = sessionId
       hasConnectedRef.current = true
+      retryCountRef.current = 0 // Reset on successful connection
+      setRetryCount(0)
 
       // Start SSE stream for output
       const eventSource = new EventSource(`/api/terminal/stream?sessionId=${sessionId}`)
@@ -175,21 +193,53 @@ export function WebTerminal({
       }
 
       eventSource.onerror = () => {
-        setConnectionState('error')
-        setError('Connection lost')
-        isConnectingRef.current = false
         eventSource.close()
+        eventSourceRef.current = null
+        isConnectingRef.current = false
+        
+        // Auto-retry on connection loss if we haven't exceeded max retries
+        if (retryCountRef.current < MAX_RETRIES) {
+          retryCountRef.current++
+          setRetryCount(retryCountRef.current)
+          console.log(`[WebTerminal] Connection lost, retrying (${retryCountRef.current}/${MAX_RETRIES})...`)
+          
+          // Wait a bit before retrying
+          retryTimeoutRef.current = setTimeout(() => {
+            connect(true)
+          }, 1000 * retryCountRef.current) // Exponential backoff: 1s, 2s, 3s
+        } else {
+          setConnectionState('error')
+          setError('Connection lost')
+        }
       }
 
     } catch (err) {
-      setConnectionState('error')
-      setError(err instanceof Error ? err.message : 'Failed to connect')
       isConnectingRef.current = false
+      
+      // Auto-retry on initial connection failure
+      if (retryCountRef.current < MAX_RETRIES) {
+        retryCountRef.current++
+        setRetryCount(retryCountRef.current)
+        console.log(`[WebTerminal] Connection failed, retrying (${retryCountRef.current}/${MAX_RETRIES})...`)
+        
+        retryTimeoutRef.current = setTimeout(() => {
+          connect(true)
+        }, 1000 * retryCountRef.current)
+      } else {
+        setConnectionState('error')
+        setError(err instanceof Error ? err.message : 'Failed to connect')
+      }
     }
   }, [connectionState, onReady])
 
   // Disconnect from terminal
   const disconnect = useCallback(async () => {
+    // Clear any pending retry
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current)
+      retryTimeoutRef.current = null
+    }
+    
     if (eventSourceRef.current) {
       eventSourceRef.current.close()
       eventSourceRef.current = null
@@ -209,6 +259,8 @@ export function WebTerminal({
     }
 
     isConnectingRef.current = false
+    retryCountRef.current = 0
+    setRetryCount(0)
     setConnectionState('disconnected')
     onDisconnect?.()
   }, [onDisconnect])
@@ -290,6 +342,11 @@ export function WebTerminal({
       if (inputTimeoutRef.current) {
         clearTimeout(inputTimeoutRef.current)
         inputTimeoutRef.current = null
+      }
+      // Clear retry timeout
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current)
+        retryTimeoutRef.current = null
       }
       // Don't call disconnect here - it's async and may cause issues
       if (eventSourceRef.current) {
@@ -397,7 +454,11 @@ export function WebTerminal({
         {connectionState === 'connecting' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#1a1b26]/90">
             <Loader2 className="w-12 h-12 text-[#7aa2f7] mb-4 animate-spin" />
-            <p className="text-[#a9b1d6]">Connecting to VM...</p>
+            <p className="text-[#a9b1d6]">
+              {retryCount > 0 
+                ? `Reconnecting... (attempt ${retryCount}/${MAX_RETRIES})`
+                : 'Connecting to VM...'}
+            </p>
           </div>
         )}
 

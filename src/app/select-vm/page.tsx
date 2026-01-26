@@ -56,6 +56,14 @@ const vmOptions: VMOption[] = [
     url: 'https://orgo.ai',
   },
   {
+    id: 'aws',
+    name: 'AWS EC2',
+    description: 'Enterprise-grade cloud infrastructure. Pay-as-you-go pricing.',
+    icon: <img src="/logos/aws.png" alt="AWS" className="w-12 h-12 object-contain" />,
+    available: true,
+    url: 'https://aws.amazon.com',
+  },
+  {
     id: 'e2b',
     name: 'E2B',
     description: 'Sandboxed cloud environments built for AI agents.',
@@ -72,14 +80,6 @@ const vmOptions: VMOption[] = [
     available: false,
     comingSoon: true,
     url: 'https://fly.io',
-  },
-  {
-    id: 'aws',
-    name: 'AWS EC2',
-    description: 'Enterprise-grade cloud infrastructure. Pay-as-you-go pricing.',
-    icon: <img src="/logos/aws.png" alt="AWS" className="w-12 h-12 object-contain" />,
-    available: true,
-    url: 'https://aws.amazon.com',
   },
   {
     id: 'railway',

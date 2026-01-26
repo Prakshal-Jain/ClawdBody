@@ -49,6 +49,17 @@ export async function POST(request: NextRequest) {
 
     const vmProvider = setupState.vmProvider || 'orgo'
 
+    // Clean up any existing sessions for this user
+    const sessionManager = getSessionManager()
+    sessionManager.cleanupUserSessions(session.user.id)
+    
+    // Also clean up output buffers for old sessions
+    Array.from(sessionOutputBuffers.keys()).forEach(key => {
+      if (key.startsWith(`${session.user.id}-`)) {
+        sessionOutputBuffers.delete(key)
+      }
+    })
+
     // Generate session ID
     const sessionId = `${session.user.id}-${Date.now()}`
 
@@ -122,8 +133,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Store session in manager using the proper method
-    const sessionManager = getSessionManager()
+    // Store session in manager
     sessionManager.addSession(sessionId, provider)
 
     return NextResponse.json({

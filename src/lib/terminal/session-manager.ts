@@ -104,6 +104,22 @@ class TerminalSessionManager implements ITerminalSessionManager {
     return Array.from(this.sessions.keys())
   }
 
+  /**
+   * Clean up all sessions for a specific user
+   * Session IDs are formatted as `{userId}-{timestamp}`
+   */
+  cleanupUserSessions(userId: string): void {
+    const sessionIds = Array.from(this.sessions.keys())
+    const userSessions = sessionIds.filter(id => id.startsWith(`${userId}-`))
+    
+    for (const sessionId of userSessions) {
+      console.log(`[Session Manager] Cleaning up stale session ${sessionId} for user ${userId}`)
+      this.closeSession(sessionId).catch(err => {
+        console.error(`[Session Manager] Error cleaning up session ${sessionId}:`, err)
+      })
+    }
+  }
+
   private resetSessionTimeout(sessionId: string): void {
     // Clear existing timeout
     const existingTimeout = this.sessionTimeouts.get(sessionId)
