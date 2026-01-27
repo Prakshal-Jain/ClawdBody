@@ -67,6 +67,10 @@ export async function GET(request: NextRequest) {
         response.orgoComputerUrl = vm.orgoComputerUrl
         response.orgoProjectId = vm.orgoProjectId
         response.orgoProjectName = vm.orgoProjectName
+      } else if (vm.provider === 'e2b') {
+        response.e2bSandboxId = vm.e2bSandboxId
+        response.e2bTemplateId = vm.e2bTemplateId
+        response.e2bTimeout = vm.e2bTimeout
       }
 
       return NextResponse.json(response)
@@ -116,6 +120,10 @@ export async function GET(request: NextRequest) {
       if (awsState.awsInstanceId && awsState.awsRegion) {
         response.awsConsoleUrl = `https://${awsState.awsRegion}.console.aws.amazon.com/ec2/home?region=${awsState.awsRegion}#InstanceDetails:instanceId=${awsState.awsInstanceId}`
       }
+    } else if (setupState.vmProvider === 'e2b') {
+      // E2B doesn't store sandbox info in SetupState, it's per-VM
+      // Just mark that it's an E2B provider
+      response.isE2B = true
     } else {
       response.orgoComputerId = setupState.orgoComputerId
       response.orgoComputerUrl = setupState.orgoComputerUrl

@@ -6,7 +6,7 @@ import { Github, Mail, Calendar, HardDrive, MessageSquare, MoreHorizontal } from
 
 export function LandingPage() {
   const steps = [
-    { number: '1', text: 'Connect your sources' },
+    { number: '1', text: 'Connect your GitHub' },
     { number: '2', text: 'Get a cloud VM' },
     { number: '3', text: 'AI runs 24/7 inferring & executing tasks' },
   ]
@@ -35,11 +35,11 @@ export function LandingPage() {
           >
             <img 
               src="/logos/ClawdBrain.png" 
-              alt="ClawdBrain" 
+              alt="ClawdBody" 
               className="h-28 sm:h-32 lg:h-40 object-contain"
             />
             <span className="text-5xl sm:text-6xl lg:text-7xl font-bold bg-gradient-to-r from-rose-500 via-slate-400 to-teal-400 bg-clip-text text-transparent">
-              ClawdBrain
+              ClawdBody
             </span>
           </motion.div>
 
@@ -49,17 +49,8 @@ export function LandingPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2, duration: 0.6 }}
           >
-            AI that actually knows you and execute tasks
+            1-Click ClawdBot deployment on VMs that runs 24/7 automating your life and business.
           </motion.h1>
-
-          <motion.h2
-            className="text-3xl sm:text-4xl lg:text-5xl font-bold mb-6 bg-gradient-to-r from-rose-400 via-rose-300 to-teal-400 bg-clip-text text-transparent"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.25, duration: 0.6 }}
-          >
-            Automate your life and your business
-          </motion.h2>
 
           <motion.p
             className="text-lg sm:text-xl text-gray-400 mb-10 max-w-2xl mx-auto"

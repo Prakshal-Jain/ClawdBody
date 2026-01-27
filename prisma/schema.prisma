@@ -78,6 +78,9 @@ model SetupState {
   awsRegion          String? @default("us-east-1")
   awsInstanceType    String? @default("t3.micro")
 
+  // E2B Credentials
+  e2bApiKey          String?
+
   // Orgo VM info
   orgoProjectId   String?
   orgoProjectName String?
@@ -133,6 +136,11 @@ model VM {
   awsRegion       String?
   awsPublicIp     String?
   awsPrivateKey   String?
+
+  // E2B specific fields
+  e2bSandboxId    String?
+  e2bTemplateId   String?
+  e2bTimeout      Int?     @default(3600) // Timeout in seconds
 
   // SSH connection info
   sshHost     String?

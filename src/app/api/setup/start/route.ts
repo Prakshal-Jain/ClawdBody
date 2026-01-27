@@ -4,9 +4,11 @@ import { authOptions } from '@/app/api/auth/[...nextauth]/route'
 import { prisma } from '@/lib/prisma'
 import { OrgoClient, generateComputerName } from '@/lib/orgo'
 import { AWSClient, generateInstanceName } from '@/lib/aws'
+import { E2BClient, generateSandboxName } from '@/lib/e2b'
 import { GitHubClient } from '@/lib/github'
 import { VMSetup } from '@/lib/vm-setup'
 import { AWSVMSetup } from '@/lib/aws-vm-setup'
+import { E2BVMSetup } from '@/lib/e2b-vm-setup'
 // Import type from Prisma client for type checking
 import type { SetupState } from '@prisma/client'
 
@@ -59,6 +61,15 @@ export async function POST(request: NextRequest) {
       if (!awsAccessKeyId || !awsSecretAccessKey) {
         return NextResponse.json({ 
           error: 'AWS credentials not configured. Please go back and configure your AWS credentials.' 
+        }, { status: 400 })
+      }
+    } else if (vmProvider === 'e2b') {
+      // Type assertion to access E2B fields
+      const e2bState = setupState as SetupState & { e2bApiKey?: string }
+      const e2bApiKey = e2bState?.e2bApiKey
+      if (!e2bApiKey) {
+        return NextResponse.json({ 
+          error: 'E2B API key not configured. Please go back and configure your E2B API key.' 
         }, { status: 400 })
       }
     } else {
@@ -126,6 +137,19 @@ export async function POST(request: NextRequest) {
         awsState.awsSecretAccessKey!,
         awsState.awsRegion || 'us-east-1',
         vm?.awsInstanceType || awsState.awsInstanceType || 't3.micro',
+        telegramBotToken,
+        telegramUserId,
+        vmId // Pass vmId
+      ).catch(console.error)
+    } else if (vmProvider === 'e2b') {
+      // Type assertion to access E2B fields
+      const e2bState = setupState as SetupState & { e2bApiKey?: string }
+      runE2BSetupProcess(
+        session.user.id,
+        claudeApiKey,
+        e2bState.e2bApiKey!,
+        vm?.e2bTemplateId || 'base',
+        vm?.e2bTimeout || 3600,
         telegramBotToken,
         telegramUserId,
         vmId // Pass vmId
@@ -896,4 +920,251 @@ async function runAWSSetupProcess(
   }
 }
 
+/**
+ * E2B Sandbox Setup Process
+ */
+async function runE2BSetupProcess(
+  userId: string,
+  claudeApiKey: string,
+  e2bApiKey: string,
+  templateId: string,
+  timeout: number,
+  telegramBotToken?: string,
+  telegramUserId?: string,
+  vmId?: string
+) {
+  const updateStatus = async (updates: Partial<{
+    status: string
+    vmCreated: boolean
+    repoCreated: boolean
+    repoCloned: boolean
+    gitSyncConfigured: boolean
+    clawdbotInstalled: boolean
+    telegramConfigured: boolean
+    gatewayStarted: boolean
+    vaultRepoName: string
+    vaultRepoUrl: string
+    vmStatus: string
+    errorMessage: string
+  }>) => {
+    // Update SetupState
+    await prisma.setupState.update({
+      where: { userId },
+      data: updates,
+    })
+    
+    // Also update VM model if vmId is provided
+    if (vmId) {
+      const vmUpdates: Record<string, unknown> = {}
+      if (updates.status !== undefined) vmUpdates.status = updates.status
+      if (updates.vmCreated !== undefined) vmUpdates.vmCreated = updates.vmCreated
+      if (updates.repoCloned !== undefined) vmUpdates.repoCloned = updates.repoCloned
+      if (updates.gitSyncConfigured !== undefined) vmUpdates.gitSyncConfigured = updates.gitSyncConfigured
+      if (updates.clawdbotInstalled !== undefined) vmUpdates.clawdbotInstalled = updates.clawdbotInstalled
+      if (updates.gatewayStarted !== undefined) vmUpdates.gatewayStarted = updates.gatewayStarted
+      if (updates.errorMessage !== undefined) vmUpdates.errorMessage = updates.errorMessage
+      
+      if (Object.keys(vmUpdates).length > 0) {
+        await prisma.vM.update({
+          where: { id: vmId },
+          data: vmUpdates,
+        })
+      }
+    }
+  }
 
+  let sandbox: any = null
+
+  try {
+    // Get setup state
+    const setupState = await prisma.setupState.findUnique({
+      where: { userId },
+    })
+
+    // Get GitHub access token
+    const account = await prisma.account.findFirst({
+      where: { userId, provider: 'github' },
+    })
+
+    if (!account?.access_token) {
+      throw new Error('GitHub account not connected')
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } })
+    const githubClient = new GitHubClient(account.access_token)
+    const e2bClient = new E2BClient(e2bApiKey)
+
+    // 1. Create E2B Sandbox
+    console.log(`Creating E2B sandbox with template: ${templateId}...`)
+    await updateStatus({ status: 'provisioning', vmStatus: 'creating' })
+
+    const sandboxName = generateSandboxName()
+    const { sandbox: createdSandbox, sandboxId } = await e2bClient.createSandbox({
+      templateId,
+      timeout,
+      metadata: { name: sandboxName, userId },
+    })
+    sandbox = createdSandbox
+
+    // Update VM with sandbox ID
+    if (vmId) {
+      await prisma.vM.update({
+        where: { id: vmId },
+        data: { e2bSandboxId: sandboxId },
+      })
+    }
+
+    await updateStatus({
+      vmCreated: true,
+      vmStatus: 'running',
+    })
+
+    console.log(`E2B sandbox ${sandboxId} is running`)
+
+    // 2. Use existing GitHub vault repository or create new one
+    const githubUser = await githubClient.getUser()
+    let vaultRepoName: string | undefined
+    let vaultRepoUrl: string | undefined
+    let vaultSshUrl: string | undefined
+
+    if (setupState?.vaultRepoName && setupState?.vaultRepoUrl) {
+      console.log(`Using existing vault repository: ${setupState.vaultRepoName}`)
+      
+      const repoExists = await githubClient.repoExists(setupState.vaultRepoName)
+      if (repoExists) {
+        vaultRepoName = setupState.vaultRepoName
+        vaultRepoUrl = setupState.vaultRepoUrl
+        vaultSshUrl = `git@github.com:${githubUser.login}/${vaultRepoName}.git`
+        
+        await updateStatus({
+          repoCreated: true,
+          vaultRepoName,
+          vaultRepoUrl,
+        })
+      }
+    }
+
+    if (!vaultRepoName) {
+      console.log('Creating new vault repository...')
+      await updateStatus({ status: 'creating_repo' })
+      
+      const vaultRepo = await githubClient.createVaultRepo(`samantha-vault-${Date.now().toString(36)}`)
+      vaultRepoName = vaultRepo.name
+      vaultRepoUrl = vaultRepo.url
+      vaultSshUrl = vaultRepo.sshUrl
+      
+      await updateStatus({
+        repoCreated: true,
+        vaultRepoName,
+        vaultRepoUrl,
+      })
+    }
+
+    // 3. Configure sandbox
+    console.log('Configuring E2B sandbox...')
+    await updateStatus({ status: 'configuring_vm' })
+
+    const e2bVMSetup = new E2BVMSetup(
+      e2bClient,
+      sandbox,
+      sandboxId,
+      (progress) => {
+        console.log(`[E2B Setup] ${progress.step}: ${progress.message}`)
+      }
+    )
+
+    // Install essentials (E2B comes with Python pre-installed)
+    console.log('Installing essential tools...')
+    await e2bVMSetup.installEssentials()
+
+    // Generate SSH key on sandbox
+    console.log('Generating SSH key for GitHub access...')
+    const { publicKey, success: sshKeySuccess } = await e2bVMSetup.generateSSHKey()
+    if (!sshKeySuccess || !publicKey) {
+      throw new Error('Failed to generate SSH key on sandbox')
+    }
+
+    if (!vaultRepoName) {
+      throw new Error('Vault repository name is not set')
+    }
+
+    // Add deploy key to GitHub repo
+    await githubClient.createDeployKey(vaultRepoName, publicKey)
+
+    // Configure git and clone repo
+    await e2bVMSetup.configureGit(githubUser.login, githubUser.email || `${githubUser.login}@users.noreply.github.com`)
+
+    if (!vaultSshUrl) {
+      throw new Error('Failed to get vault SSH URL')
+    }
+
+    const cloneSuccess = await e2bVMSetup.cloneVaultRepo(vaultSshUrl)
+    if (!cloneSuccess) {
+      throw new Error('Failed to clone vault repository to sandbox')
+    }
+    await updateStatus({ repoCloned: true })
+
+    // Set up Git sync
+    await e2bVMSetup.setupGitSync()
+    await updateStatus({ gitSyncConfigured: true })
+
+    // Install Clawdbot
+    console.log('Installing Clawdbot...')
+    const clawdbotResult = await e2bVMSetup.installClawdbot()
+    if (!clawdbotResult.success) {
+      throw new Error('Failed to install Clawdbot')
+    }
+    await updateStatus({ clawdbotInstalled: true })
+
+    // Link vault to Clawdbot knowledge directory
+    console.log('Linking vault to Clawdbot knowledge directory...')
+    await e2bVMSetup.linkVaultToKnowledge()
+
+    // Configure Clawdbot with Telegram if token is provided
+    const finalTelegramToken = telegramBotToken || process.env.TELEGRAM_BOT_TOKEN
+    const finalTelegramUserId = telegramUserId || process.env.TELEGRAM_USER_ID
+
+    if (finalTelegramToken) {
+      console.log('Configuring Clawdbot with Telegram...')
+      const telegramSuccess = await e2bVMSetup.setupClawdbotTelegram({
+        claudeApiKey,
+        telegramBotToken: finalTelegramToken,
+        telegramUserId: finalTelegramUserId,
+        clawdbotVersion: clawdbotResult.version,
+        heartbeatIntervalMinutes: 30,
+        userId,
+        apiBaseUrl: process.env.NEXTAUTH_URL || 'http://localhost:3000',
+      })
+      await updateStatus({ telegramConfigured: telegramSuccess })
+
+      if (telegramSuccess) {
+        console.log('Starting Clawdbot gateway...')
+        const gatewaySuccess = await e2bVMSetup.startClawdbotGateway(claudeApiKey, finalTelegramToken)
+        await updateStatus({ gatewayStarted: gatewaySuccess })
+      }
+    } else {
+      await e2bVMSetup.storeClaudeKey(claudeApiKey)
+    }
+
+    // Setup complete!
+    await updateStatus({ status: 'ready' })
+    console.log('E2B sandbox setup complete!')
+
+  } catch (error) {
+    console.error('E2B setup process error:', error)
+    await updateStatus({
+      status: 'failed',
+      errorMessage: error instanceof Error ? error.message : 'Unknown error occurred',
+    })
+
+    // Try to clean up sandbox on failure
+    if (sandbox) {
+      try {
+        const e2bClient = new E2BClient(e2bApiKey)
+        await e2bClient.killSandbox(sandbox)
+      } catch (cleanupError) {
+        console.error('Failed to clean up sandbox:', cleanupError)
+      }
+    }
+  }
+}

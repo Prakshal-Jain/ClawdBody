@@ -57,13 +57,13 @@ export async function POST(request: NextRequest) {
       awsPrivateKey = vm.awsPrivateKey
     } else {
       // Fall back to SetupState for backward compatibility
-      const setupState = await prisma.setupState.findUnique({
-        where: { userId: session.user.id },
-      })
+    const setupState = await prisma.setupState.findUnique({
+      where: { userId: session.user.id },
+    })
 
-      if (!setupState) {
-        return NextResponse.json({ error: 'No VM configured' }, { status: 404 })
-      }
+    if (!setupState) {
+      return NextResponse.json({ error: 'No VM configured' }, { status: 404 })
+    }
 
       vmProvider = setupState.vmProvider || 'orgo'
       const awsState = setupState as AWSSetupState

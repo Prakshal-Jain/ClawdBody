@@ -27,6 +27,7 @@ export async function GET() {
         awsAccessKeyId: true,
         awsSecretAccessKey: true,
         awsRegion: true,
+        e2bApiKey: true,
       },
     })
 
@@ -36,6 +37,7 @@ export async function GET() {
         hasOrgoApiKey: !!setupState?.orgoApiKey,
         hasAwsCredentials: !!(setupState?.awsAccessKeyId && setupState?.awsSecretAccessKey),
         awsRegion: setupState?.awsRegion || 'us-east-1',
+        hasE2bApiKey: !!setupState?.e2bApiKey,
       },
     })
   } catch (error) {
@@ -68,13 +70,16 @@ export async function POST(request: NextRequest) {
       // AWS specific
       awsInstanceType,
       awsRegion,
+      // E2B specific
+      e2bTemplateId,
+      e2bTimeout,
     } = body
 
     if (!name || !provider) {
       return NextResponse.json({ error: 'Name and provider are required' }, { status: 400 })
     }
 
-    if (!['orgo', 'aws', 'flyio'].includes(provider)) {
+    if (!['orgo', 'aws', 'flyio', 'e2b'].includes(provider)) {
       return NextResponse.json({ error: 'Invalid provider' }, { status: 400 })
     }
 
@@ -91,6 +96,9 @@ export async function POST(request: NextRequest) {
         // AWS specific
         awsInstanceType,
         awsRegion,
+        // E2B specific
+        e2bTemplateId,
+        e2bTimeout,
       },
     })
 

@@ -234,7 +234,7 @@ export function SetupWizard() {
         <div className="flex items-center justify-between mb-12">
           <div>
             <h1 className="font-display text-3xl font-bold mb-1">
-              <span className="text-gradient">OS-1</span> Setup
+              <span className="text-gradient">ClawdBody</span> Setup
             </h1>
             <p className="text-sam-text-dim font-mono text-sm">
               Welcome, {session?.user?.name || 'Agent'}
@@ -587,7 +587,7 @@ export function SetupWizard() {
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex-1">
                     <h2 className="text-3xl font-display font-bold mb-2">
-                      <span className="text-gradient">OS-1 is ready</span>
+                      <span className="text-gradient">ClawdBody is ready</span>
                     </h2>
                     <p className="text-sam-text-dim max-w-md">
                       Your AI agent is fully configured and ready to assist you.
@@ -762,7 +762,7 @@ export function SetupWizard() {
                   </li>
                   <li className="flex items-start gap-3">
                     <span className="text-sam-accent">3.</span>
-                    <span>Watch OS-1 proactively handle your tasks</span>
+                    <span>Watch ClawdeBot proactively handle your tasks</span>
                   </li>
                   {setupStatus?.telegramConfigured && setupStatus?.gatewayStarted && (
                     <li className="flex items-start gap-3">

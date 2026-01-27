@@ -6,6 +6,8 @@ import { useSession, signOut } from 'next-auth/react'
 import { motion } from 'framer-motion'
 import { Mail, Calendar, MessageSquare, FileText, MessageCircle, Bot, Video, Phone, Loader2, RefreshCw, Check, Key, AlertCircle, ArrowRight, ExternalLink, LogOut, Github, X, Server, GitBranch, Terminal, CheckCircle2, ChevronDown, ChevronUp, Trash2, XCircle, Monitor } from 'lucide-react'
 import { WebTerminal } from '@/components/WebTerminal'
+import { OrgoTerminal } from '@/components/OrgoTerminal'
+import { E2BTerminal } from '@/components/E2BTerminal'
 
 interface Connector {
   id: string
@@ -29,7 +31,7 @@ const connectors: Connector[] = [
     id: 'calendar',
     name: 'Google Calendar',
     icon: <Calendar className="w-6 h-6" />,
-    description: 'Sync your events so OS-1 stays on top of meetings, plans, and deadlines.',
+    description: 'Sync your events so ClawdeBot stays on top of meetings, plans, and deadlines.',
     autoLiveSync: true,
     available: true,
   },
@@ -116,6 +118,11 @@ interface SetupStatus {
   awsInstanceName?: string
   awsPublicIp?: string
   awsRegion?: string
+  // E2B-specific
+  e2bSandboxId?: string
+  e2bTemplateId?: string
+  e2bTimeout?: number
+  isE2B?: boolean
   // Common
   vaultRepoUrl?: string
   errorMessage?: string
@@ -135,6 +142,9 @@ interface VMInfo {
   awsInstanceType?: string
   awsRegion?: string
   awsPublicIp?: string
+  e2bSandboxId?: string
+  e2bTemplateId?: string
+  e2bTimeout?: number
 }
 
 // Memory density weights for each source (out of 100 total)
@@ -409,7 +419,15 @@ export default function LearningSourcesPage() {
           setIsCheckingRedirect(false)
           
           // Set UI state based on status
-          if (status.status === 'ready' && status.orgoComputerId) {
+          // Check if VM is ready - works for all providers (Orgo, AWS, E2B)
+          const isVMReady = status.status === 'ready' && (
+            status.orgoComputerId ||  // Orgo
+            status.awsInstanceId ||   // AWS
+            status.e2bSandboxId ||    // E2B
+            status.isE2B ||           // E2B fallback
+            status.vmCreated          // Generic check
+          )
+          if (isVMReady) {
             setShowSetupProgress(false)
           } else if (status.status && status.status !== 'pending' && status.status !== 'ready' && status.status !== 'failed') {
             setShowSetupProgress(true)
@@ -563,7 +581,7 @@ export default function LearningSourcesPage() {
           >
             <img 
               src="/logos/ClawdBrain.png" 
-              alt="ClawdBrain" 
+              alt="ClawdBody" 
               className="h-16 md:h-20 object-contain"
             />
             {session?.user?.name && (
@@ -633,7 +651,7 @@ export default function LearningSourcesPage() {
                 setSetupLogs([])
               }}
             />
-          ) : setupStatus?.status === 'ready' && (setupStatus?.orgoComputerId || setupStatus?.awsInstanceId) ? (
+          ) : setupStatus?.status === 'ready' && (setupStatus?.orgoComputerId || setupStatus?.awsInstanceId || setupStatus?.e2bSandboxId || setupStatus?.isE2B || setupStatus?.vmCreated) ? (
             <ComputerConnectedView 
               setupStatus={setupStatus}
               vmId={vmId}
@@ -1606,6 +1624,7 @@ function ComputerConnectedView({
 }) {
   const [isDeleting, setIsDeleting] = useState(false)
   const [currentScreenshot, setCurrentScreenshot] = useState<string | null>(null)
+  const [activeVMTab, setActiveVMTab] = useState<'screen' | 'terminal'>('screen')
   const [showTelegramConfig, setShowTelegramConfig] = useState(false)
   const [telegramBotToken, setTelegramBotToken] = useState('')
   const [telegramUserId, setTelegramUserId] = useState('')
@@ -1731,9 +1750,38 @@ function ComputerConnectedView({
       {/* VM Stream (Left Column - 2/3 width) */}
       <div className="lg:col-span-2 bg-sam-surface/50 border border-sam-border rounded-2xl p-4 flex flex-col">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-display font-bold text-sam-text">
-            {setupStatus?.vmProvider === 'aws' ? 'EC2 Instance' : 'VM Screen'}
-          </h2>
+          <div className="flex items-center gap-4">
+            <h2 className="text-xl font-display font-bold text-sam-text">
+              {setupStatus?.vmProvider === 'aws' ? 'EC2 Instance' : setupStatus?.vmProvider === 'e2b' ? 'E2B Sandbox' : 'VM'}
+            </h2>
+            {/* Tabs for Orgo VMs only (screen + terminal view) */}
+            {setupStatus?.vmProvider === 'orgo' && setupStatus?.vmCreated && (
+              <div className="flex items-center gap-1 bg-sam-bg/80 border border-sam-border rounded-lg p-1">
+                <button
+                  onClick={() => setActiveVMTab('screen')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ${
+                    activeVMTab === 'screen'
+                      ? 'bg-sam-accent/15 text-sam-accent border-sam-accent/30'
+                      : 'text-sam-text-dim hover:text-sam-text hover:bg-sam-surface/50 border-transparent'
+                  }`}
+                >
+                  <Monitor className="w-3.5 h-3.5" />
+                  Screen
+                </button>
+                <button
+                  onClick={() => setActiveVMTab('terminal')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ${
+                    activeVMTab === 'terminal'
+                      ? 'bg-sam-accent/15 text-sam-accent border-sam-accent/30'
+                      : 'text-sam-text-dim hover:text-sam-text hover:bg-sam-surface/50 border-transparent'
+                  }`}
+                >
+                  <Terminal className="w-3.5 h-3.5" />
+                  Terminal
+                </button>
+              </div>
+            )}
+          </div>
           {setupStatus?.vmProvider === 'aws' && setupStatus?.awsPublicIp && (
             <a
               href={`https://${setupStatus.awsRegion || 'us-east-1'}.console.aws.amazon.com/ec2/home?region=${setupStatus.awsRegion || 'us-east-1'}#InstanceDetails:instanceId=${setupStatus.awsInstanceId}`}
@@ -1766,22 +1814,41 @@ function ComputerConnectedView({
               autoConnect={true}
               className="w-full h-full"
             />
+          ) : setupStatus?.vmProvider === 'e2b' && setupStatus?.e2bSandboxId ? (
+            // E2B: Terminal only (no screen view)
+            <E2BTerminal
+              vmId={vmId || undefined}
+              sandboxId={setupStatus?.e2bSandboxId || undefined}
+              title="E2B Sandbox Terminal"
+              className="w-full h-full"
+            />
           ) : setupStatus?.vmCreated && setupStatus?.orgoComputerId ? (
-            currentScreenshot ? (
-              <img 
-                src={currentScreenshot.startsWith('http') ? currentScreenshot : `data:image/png;base64,${currentScreenshot}`}
-                alt="VM Screen"
-                className="w-full h-full object-contain"
-                onError={(e) => {
-                  console.error('Failed to load screenshot image')
-                  setCurrentScreenshot(null) // Clear on error to show loading/error state
-                }}
-              />
+            // Orgo VM: Show content based on active tab
+            activeVMTab === 'screen' ? (
+              currentScreenshot ? (
+                <img 
+                  src={currentScreenshot.startsWith('http') ? currentScreenshot : `data:image/png;base64,${currentScreenshot}`}
+                  alt="VM Screen"
+                  className="w-full h-full object-contain"
+                  onError={(e) => {
+                    console.error('Failed to load screenshot image')
+                    setCurrentScreenshot(null) // Clear on error to show loading/error state
+                  }}
+                />
+              ) : (
+                <div className="flex flex-col items-center gap-3 text-sam-text-dim">
+                  <Loader2 className="w-8 h-8 animate-spin text-sam-accent" />
+                  <p className="text-sm font-mono">Loading VM screen...</p>
+                </div>
+              )
             ) : (
-              <div className="flex flex-col items-center gap-3 text-sam-text-dim">
-                <Loader2 className="w-8 h-8 animate-spin text-sam-accent" />
-                <p className="text-sm font-mono">Loading VM screen...</p>
-              </div>
+              // Terminal tab - Orgo bash terminal
+              <OrgoTerminal
+                vmId={vmId || undefined}
+                computerId={setupStatus?.orgoComputerId || undefined}
+                title="Orgo Terminal"
+                className="w-full h-full"
+              />
             )
           ) : (
             <div className="flex flex-col items-center gap-3 text-sam-text-dim">
@@ -1825,7 +1892,7 @@ function ComputerConnectedView({
             </a>
           )}
           {/* Orgo Console Link */}
-          {setupStatus.vmProvider !== 'aws' && setupStatus.orgoComputerUrl && (
+          {setupStatus.vmProvider === 'orgo' && setupStatus.orgoComputerUrl && (
             <a
               href={setupStatus.orgoComputerUrl}
               target="_blank"
@@ -1836,6 +1903,15 @@ function ComputerConnectedView({
               <span className="font-mono text-sm">Open VM Console</span>
               <ExternalLink className="w-4 h-4 text-sam-text-dim ml-auto" />
             </a>
+          )}
+          {/* E2B Sandbox Info */}
+          {setupStatus.vmProvider === 'e2b' && setupStatus.e2bSandboxId && (
+            <div className="flex items-center gap-2 px-4 py-2 rounded-lg border border-sam-border bg-sam-surface w-full">
+              <Server className="w-4 h-4 text-sam-accent" />
+              <span className="font-mono text-sm truncate" title={setupStatus.e2bSandboxId}>
+                Sandbox: {setupStatus.e2bSandboxId.slice(0, 12)}...
+              </span>
+            </div>
           )}
           {setupStatus.vaultRepoUrl && (
             <a

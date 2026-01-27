@@ -58,13 +58,28 @@ interface Credentials {
   hasOrgoApiKey: boolean
   hasAwsCredentials: boolean
   awsRegion: string
+  hasE2bApiKey: boolean
+}
+
+interface E2BTemplate {
+  id: string
+  name: string
+  description: string
+  recommended?: boolean
+}
+
+interface E2BTimeoutOption {
+  id: number
+  name: string
+  description: string
+  recommended?: boolean
 }
 
 const vmOptions: VMOption[] = [
   {
     id: 'orgo',
     name: 'Orgo',
-    description: 'Fast, reliable virtual machines optimized for AI workloads.',
+    description: 'Fast, reliable virtual machines optimized for AI workloads with GUI.',
     icon: <img src="/logos/orgo.png" alt="Orgo" className="w-12 h-12 object-contain" />,
     available: true,
     url: 'https://orgo.ai',
@@ -82,8 +97,7 @@ const vmOptions: VMOption[] = [
     name: 'E2B',
     description: 'Sandboxed cloud environments built for AI agents.',
     icon: <img src="/logos/e2b.png" alt="E2B" className="w-12 h-12 object-contain" />,
-    available: false,
-    comingSoon: true,
+    available: true,
     url: 'https://e2b.dev',
   },
   {
@@ -173,6 +187,18 @@ export default function SelectVMPage() {
   const [awsError, setAwsError] = useState<string | null>(null)
   const [awsVMName, setAwsVMName] = useState('')
 
+  // E2B configuration modal state
+  const [showE2BModal, setShowE2BModal] = useState(false)
+  const [e2bApiKey, setE2bApiKey] = useState('')
+  const [isValidatingE2B, setIsValidatingE2B] = useState(false)
+  const [e2bKeyValidated, setE2bKeyValidated] = useState(false)
+  const [e2bTemplates, setE2bTemplates] = useState<E2BTemplate[]>([])
+  const [e2bTimeoutOptions, setE2bTimeoutOptions] = useState<E2BTimeoutOption[]>([])
+  const [selectedE2bTemplate, setSelectedE2bTemplate] = useState('base')
+  const [selectedE2bTimeout, setSelectedE2bTimeout] = useState(3600)
+  const [e2bError, setE2bError] = useState<string | null>(null)
+  const [e2bVMName, setE2bVMName] = useState('')
+
   // Load user's VMs and credentials
   useEffect(() => {
     if (session?.user?.id) {
@@ -249,6 +275,19 @@ export default function SelectVMPage() {
       } else {
         setShowAWSModal(true)
       }
+    } else if (provider === 'e2b') {
+      setE2bVMName(`E2B Sandbox ${userVMs.filter(vm => vm.provider === 'e2b').length + 1}`)
+      setE2bError(null)
+      
+      // If we already have E2B API key stored, skip to configuration
+      if (credentials?.hasE2bApiKey) {
+        setShowE2BModal(true)
+        setE2bKeyValidated(true)
+        // Fetch E2B data with stored key
+        await fetchE2BData()
+      } else {
+        setShowE2BModal(true)
+      }
     }
   }
 
@@ -285,6 +324,23 @@ export default function SelectVMPage() {
       }
     } catch (e) {
       console.error('Failed to fetch AWS data:', e)
+    }
+  }
+
+  const fetchE2BData = async () => {
+    try {
+      const res = await fetch('/api/setup/e2b/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ useStored: true }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setE2bTemplates(data.templates || [])
+        setE2bTimeoutOptions(data.timeoutOptions || [])
+      }
+    } catch (e) {
+      console.error('Failed to fetch E2B data:', e)
     }
   }
 
@@ -551,6 +607,95 @@ export default function SelectVMPage() {
     setAwsVMName('')
   }
 
+  // E2B handlers
+  const handleValidateE2B = async () => {
+    if (!e2bApiKey.trim()) {
+      setE2bError('Please enter your E2B API key')
+      return
+    }
+
+    setIsValidatingE2B(true)
+    setE2bError(null)
+
+    try {
+      const res = await fetch('/api/setup/e2b/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: e2bApiKey.trim() }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to validate E2B API key')
+      }
+
+      setE2bKeyValidated(true)
+      setE2bTemplates(data.templates || [])
+      setE2bTimeoutOptions(data.timeoutOptions || [])
+    } catch (e) {
+      setE2bError(e instanceof Error ? e.message : 'Failed to validate E2B API key')
+    } finally {
+      setIsValidatingE2B(false)
+    }
+  }
+
+  const handleE2BConfirm = async () => {
+    if (!e2bKeyValidated) {
+      setE2bError('Please validate your E2B API key first')
+      return
+    }
+
+    if (!e2bVMName.trim()) {
+      setE2bError('Please enter a name for your sandbox')
+      return
+    }
+
+    setIsSubmitting(true)
+    setError(null)
+
+    try {
+      // Create the VM
+      const res = await fetch('/api/vms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: e2bVMName.trim(),
+          provider: 'e2b',
+          e2bTemplateId: selectedE2bTemplate,
+          e2bTimeout: selectedE2bTimeout,
+        }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || 'Failed to create sandbox')
+      }
+
+      const data = await res.json()
+      
+      closeE2BModal()
+      
+      // Redirect to learning-sources page for this VM
+      router.push(`/learning-sources?vmId=${data.vm.id}`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong')
+      setIsSubmitting(false)
+    }
+  }
+
+  const closeE2BModal = () => {
+    setShowE2BModal(false)
+    setE2bApiKey('')
+    setE2bKeyValidated(false)
+    setE2bTemplates([])
+    setE2bTimeoutOptions([])
+    setSelectedE2bTemplate('base')
+    setSelectedE2bTimeout(3600)
+    setE2bError(null)
+    setE2bVMName('')
+  }
+
   const handleDeleteVM = async (vmId: string) => {
     if (!confirm('Are you sure you want to delete this VM?')) {
       return
@@ -601,6 +746,8 @@ export default function SelectVMPage() {
         return <img src="/logos/orgo.png" alt="Orgo" className="w-8 h-8 object-contain" />
       case 'aws':
         return <img src="/logos/aws.png" alt="AWS" className="w-8 h-8 object-contain" />
+      case 'e2b':
+        return <img src="/logos/e2b.png" alt="E2B" className="w-8 h-8 object-contain" />
       default:
         return <Server className="w-8 h-8 text-sam-text-dim" />
     }
@@ -619,7 +766,7 @@ export default function SelectVMPage() {
           >
             <img 
               src="/logos/ClawdBrain.png" 
-              alt="ClawdBrain" 
+              alt="ClawdBody" 
               className="h-16 md:h-20 object-contain"
             />
             {session?.user?.name && (
@@ -733,6 +880,7 @@ export default function SelectVMPage() {
                       <span className="text-xs text-sam-text-dim">
                         {vm.provider === 'aws' && vm.awsInstanceType}
                         {vm.provider === 'orgo' && vm.orgoProjectName}
+                        {vm.provider === 'e2b' && 'E2B Sandbox'}
                       </span>
                     </div>
                     <div>
@@ -835,7 +983,8 @@ export default function SelectVMPage() {
                   {/* Quick add indicator for configured providers */}
                   {option.available && (
                     (option.id === 'orgo' && credentials?.hasOrgoApiKey) ||
-                    (option.id === 'aws' && credentials?.hasAwsCredentials)
+                    (option.id === 'aws' && credentials?.hasAwsCredentials) ||
+                    (option.id === 'e2b' && credentials?.hasE2bApiKey)
                   ) && (
                     <div className="absolute top-3 right-3">
                       <span className="text-[10px] font-mono text-sam-accent bg-sam-accent/10 px-1.5 py-0.5 rounded">
@@ -1425,6 +1574,251 @@ export default function SelectVMPage() {
                   ) : (
                     <>
                       Add VM
+                      <Plus className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* E2B Configuration Modal */}
+      <AnimatePresence>
+        {showE2BModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+            onClick={closeE2BModal}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ duration: 0.2 }}
+              className="bg-sam-surface border border-sam-border rounded-2xl w-full max-w-lg overflow-hidden max-h-[90vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="flex items-center justify-between p-6 border-b border-sam-border sticky top-0 bg-sam-surface z-10">
+                <div className="flex items-center gap-3">
+                  <img src="/logos/e2b.png" alt="E2B" className="w-8 h-8 object-contain" />
+                  <div>
+                    <h2 className="text-xl font-display font-semibold text-sam-text">
+                      {credentials?.hasE2bApiKey ? 'Add E2B Sandbox' : 'Configure E2B'}
+                    </h2>
+                    <p className="text-xs text-sam-text-dim">Ephemeral sandboxed environments</p>
+                  </div>
+                </div>
+                <button
+                  onClick={closeE2BModal}
+                  className="p-2 rounded-lg hover:bg-sam-bg transition-colors text-sam-text-dim hover:text-sam-text"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-6 space-y-6">
+                {/* Error Display */}
+                {e2bError && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    className="p-3 rounded-lg bg-sam-error/10 border border-sam-error/30 flex items-start gap-2"
+                  >
+                    <AlertCircle className="w-4 h-4 text-sam-error flex-shrink-0 mt-0.5" />
+                    <p className="text-sam-error text-sm">{e2bError}</p>
+                  </motion.div>
+                )}
+
+                {/* VM Name */}
+                <div className="space-y-3">
+                  <label className="text-sm font-medium text-sam-text flex items-center gap-2">
+                    <Server className="w-4 h-4 text-sam-accent" />
+                    Sandbox Name
+                    <span className="text-sam-error">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={e2bVMName}
+                    onChange={(e) => setE2bVMName(e.target.value)}
+                    placeholder="e.g., My E2B Sandbox"
+                    className="w-full px-4 py-2.5 rounded-lg bg-sam-bg border border-sam-border focus:border-sam-accent focus:ring-1 focus:ring-sam-accent/30 transition-all text-sam-text placeholder:text-sam-text-dim/50 text-sm"
+                  />
+                </div>
+
+                {/* E2B API Key - only show if not already configured */}
+                {!credentials?.hasE2bApiKey && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <label className="text-sm font-medium text-sam-text flex items-center gap-2">
+                        <Key className="w-4 h-4 text-sam-accent" />
+                        E2B API Key
+                        <span className="text-sam-error">*</span>
+                      </label>
+                      <a
+                        href="https://e2b.dev/dashboard"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-sam-accent hover:text-sam-accent/80 flex items-center gap-1"
+                      >
+                        Get API key <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={e2bApiKey}
+                        onChange={(e) => {
+                          setE2bApiKey(e.target.value)
+                          setE2bKeyValidated(false)
+                        }}
+                        placeholder="e2b_..."
+                        disabled={e2bKeyValidated}
+                        className={`flex-1 px-4 py-2.5 rounded-lg bg-sam-bg border transition-all text-sam-text placeholder:text-sam-text-dim/50 font-mono text-sm ${
+                          e2bKeyValidated
+                            ? 'border-green-500/50 bg-green-500/5'
+                            : 'border-sam-border focus:border-sam-accent focus:ring-1 focus:ring-sam-accent/30'
+                        }`}
+                      />
+                      {!e2bKeyValidated ? (
+                        <button
+                          onClick={handleValidateE2B}
+                          disabled={isValidatingE2B || !e2bApiKey.trim()}
+                          className="px-4 py-2.5 rounded-lg bg-sam-accent text-sam-bg font-medium text-sm hover:bg-sam-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        >
+                          {isValidatingE2B ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              Validating
+                            </>
+                          ) : (
+                            'Validate'
+                          )}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setE2bKeyValidated(false)
+                            setE2bApiKey('')
+                          }}
+                          className="px-4 py-2.5 rounded-lg border border-sam-border text-sam-text-dim hover:text-sam-text hover:border-sam-accent/50 font-medium text-sm transition-colors flex items-center gap-2"
+                        >
+                          Change
+                        </button>
+                      )}
+                    </div>
+                    
+                    {e2bKeyValidated && (
+                      <p className="text-xs text-green-400 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> E2B API key validated successfully
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Already configured notice */}
+                {credentials?.hasE2bApiKey && (
+                  <div className="p-3 rounded-lg bg-green-500/5 border border-green-500/20">
+                    <p className="text-sm text-green-400 flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4" />
+                      Using your saved E2B API key
+                    </p>
+                  </div>
+                )}
+
+                {/* Timeout Selection */}
+                {e2bKeyValidated && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="space-y-4"
+                  >
+                    {/* Timeout Selection */}
+                    <div className="space-y-3">
+                      <label className="text-sm font-medium text-sam-text flex items-center gap-2">
+                        <Power className="w-4 h-4 text-sam-accent" />
+                        Sandbox Duration
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(e2bTimeoutOptions.length > 0 ? e2bTimeoutOptions : [
+                          { id: 300, name: '5 minutes', description: 'Short tasks' },
+                          { id: 1800, name: '30 minutes', description: 'Medium tasks' },
+                          { id: 3600, name: '1 hour', description: 'Long tasks', recommended: true },
+                          { id: 7200, name: '2 hours', description: 'Extended sessions' },
+                          { id: 21600, name: '6 hours', description: 'Very long sessions' },
+                          { id: 86400, name: '24 hours', description: 'Maximum duration' },
+                        ]).map((option) => (
+                          <button
+                            key={option.id}
+                            onClick={() => setSelectedE2bTimeout(option.id)}
+                            className={`p-3 rounded-lg border text-left transition-all ${
+                              selectedE2bTimeout === option.id
+                                ? 'border-sam-accent bg-sam-accent/10'
+                                : 'border-sam-border hover:border-sam-accent/50 hover:bg-sam-bg'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-sam-text font-medium text-sm">{option.name}</span>
+                              {option.recommended && (
+                                <span className="text-[10px] font-mono text-sam-accent bg-sam-accent/10 px-1.5 py-0.5 rounded">
+                                  Recommended
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-sam-text-dim">
+                              {option.description}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* E2B Info Notice */}
+                    <div className="p-3 rounded-lg bg-sam-bg border border-sam-border">
+                      <p className="text-xs text-sam-text-dim">
+                        <strong className="text-sam-text">Note:</strong> E2B sandboxes are ephemeral environments. 
+                        Data does not persist after the timeout expires. Sandboxes include Python, Node.js, and internet access.
+                        <a 
+                          href="https://e2b.dev/docs" 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="text-sam-accent hover:underline ml-1"
+                        >
+                          Learn more
+                        </a>
+                      </p>
+                    </div>
+                  </motion.div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-6 border-t border-sam-border flex justify-end gap-3 sticky bottom-0 bg-sam-surface">
+                <button
+                  onClick={closeE2BModal}
+                  className="px-5 py-2.5 rounded-lg border border-sam-border text-sam-text-dim hover:text-sam-text hover:border-sam-accent/50 font-medium text-sm transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleE2BConfirm}
+                  disabled={!e2bKeyValidated || isSubmitting || !e2bVMName.trim()}
+                  className="px-5 py-2.5 rounded-lg bg-sam-accent text-sam-bg font-medium text-sm hover:bg-sam-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Creating Sandbox...
+                    </>
+                  ) : (
+                    <>
+                      Add Sandbox
                       <Plus className="w-4 h-4" />
                     </>
                   )}

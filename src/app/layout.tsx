@@ -6,8 +6,8 @@ import { Providers } from '@/components/providers'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'OS-1 - Your AI Agent',
-  description: 'Set up your autonomous AI agent with memory, mind, and hands',
+  title: 'ClawdBody - Preconfigured VM for ClawdeBot',
+  description: '1 Click ClawdeBot deployment on VMs with persistent memory that runs 24/7',
 }
 
 export default function RootLayout({
