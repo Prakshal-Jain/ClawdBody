@@ -17,6 +17,7 @@ prisma/migrations/
 # Environment
 .env
 .env*.local
+.env*.local_deploy
 
 # IDE
 .idea/
