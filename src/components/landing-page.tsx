@@ -3,6 +3,14 @@
 import { signIn } from 'next-auth/react'
 import { motion } from 'framer-motion'
 import { Github, Calendar, HardDrive, MessageSquare, MoreHorizontal, ExternalLink } from 'lucide-react'
+import Script from 'next/script'
+
+// Discord Icon SVG Component
+const DiscordIcon = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+    <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515a.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0a12.64 12.64 0 0 0-.617-1.25a.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057a19.9 19.9 0 0 0 5.993 3.03a.078.078 0 0 0 .084-.028a14.09 14.09 0 0 0 1.226-1.994a.076.076 0 0 0-.041-.106a13.107 13.107 0 0 1-1.872-.892a.077.077 0 0 1-.008-.128a10.2 10.2 0 0 0 .372-.292a.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127a12.299 12.299 0 0 1-1.873.892a.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028a19.839 19.839 0 0 0 6.002-3.03a.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419c0-1.333.956-2.419 2.157-2.419c1.21 0 2.176 1.096 2.157 2.42c0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419c0-1.333.955-2.419 2.157-2.419c1.21 0 2.176 1.096 2.157 2.42c0 1.333-.946 2.418-2.157 2.418z"/>
+  </svg>
+)
 
 // Google Icon SVG Component
 const GoogleIcon = ({ className }: { className?: string }) => (
@@ -94,21 +102,139 @@ export function LandingPage() {
             Persistent memory. Sandboxed cloud VM. Works while you sleep.
           </motion.p>
 
-          <motion.button
-            onClick={() => signIn('google')}
-            className="px-8 py-4 bg-gradient-to-r from-rose-500 to-teal-400 text-slate-950 font-semibold rounded-full text-lg shadow-lg shadow-rose-500/30 hover:shadow-rose-500/50 transition-all duration-300"
+          <motion.div
+            className="inline-block bg-gradient-to-r from-rose-500 to-teal-400 rounded-full p-[2px] shadow-lg shadow-rose-500/30 hover:shadow-rose-500/50 transition-all duration-300"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.4, duration: 0.6 }}
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
           >
-            <span className="flex items-center gap-2">
+            <button
+              onClick={() => signIn('google')}
+              className="px-8 py-4 bg-white text-slate-950 font-semibold rounded-full text-lg flex items-center gap-2 transition-all duration-300"
+            >
               <GoogleIcon className="w-5 h-5" />
               Sign in with Google
-            </span>
-          </motion.button>
+            </button>
+          </motion.div>
+
+          {/* Twitter Launch Posts */}
+          <motion.div
+            className="mt-6 flex justify-center items-start"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5, duration: 0.6 }}
+          >
+            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-6 max-w-[1200px]">
+              {/* Original Tweet */}
+              <div className="w-full max-w-[380px] mx-auto scale-[0.85] sm:scale-90 min-h-[380px]">
+                <blockquote className="twitter-tweet" data-conversation="none" data-theme="dark" data-dnt="true">
+                  <p lang="en" dir="ltr">
+                    Set up 100s of Clawd bots without touching the terminal. <br /><br />
+                    You can now do it in just a few clicks.<br /><br />
+                    I am adding them all to a groupchat.<br /><br />
+                    Maybe they can start a company by working together?{' '}
+                    <a href="https://t.co/8kAaT49iB6">pic.twitter.com/8kAaT49iB6</a>
+                  </p>
+                  &mdash; nick vasilescu (@nickvasiles){' '}
+                  <a href="https://twitter.com/nickvasiles/status/2016374181160747259?ref_src=twsrc%5Etfw">
+                    January 28, 2026
+                  </a>
+                </blockquote>
+              </div>
+
+              {/* Shoutout Tweet */}
+              <div className="w-full max-w-[380px] mx-auto scale-[0.85] sm:scale-90 min-h-[380px]">
+                <blockquote className="twitter-tweet" data-conversation="none" data-theme="dark" data-dnt="true">
+                  <p lang="en" dir="ltr">
+                    Huge shoutout to{' '}
+                    <a href="https://twitter.com/prakshaljain_?ref_src=twsrc%5Etfw">@prakshaljain_</a>
+                    <br /><br />
+                    Here&#39;s his open sourced repo giving people an easy way to get started with Clawdbot
+                    <a href="https://t.co/Xa3JPpWzLR">https://t.co/Xa3JPpWzLR</a>
+                  </p>
+                  &mdash; nick vasilescu (@nickvasiles){' '}
+                  <a href="https://twitter.com/nickvasiles/status/2016374183962542233?ref_src=twsrc%5Etfw">
+                    January 28, 2026
+                  </a>
+                </blockquote>
+              </div>
+
+              {/* Prakshal Tweet */}
+              <div className="w-full max-w-[380px] mx-auto scale-[0.85] sm:scale-90 min-h-[380px]">
+                <blockquote className="twitter-tweet" data-conversation="none" data-theme="dark" data-dnt="true">
+                  <p lang="en" dir="ltr">
+                    Install Clawd Bot automatically with this script.<br />
+                    No need to spend $799 on Mac Mini!<br /><br />
+                    Don&apos;t spend hours setting it up.<br /><br />
+                    Let it run 24/7 on Orgo VM automating your life.{' '}
+                    <a href="https://t.co/TNhKMqL69n">pic.twitter.com/TNhKMqL69n</a>
+                  </p>
+                  &mdash; Prakshal Jain (@prakshaljain_){' '}
+                  <a href="https://twitter.com/prakshaljain_/status/2014931950105231653?ref_src=twsrc%5Etfw">
+                    January 24, 2026
+                  </a>
+                </blockquote>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* Community Section */}
+          <motion.div
+            className="mt-4"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.6, duration: 0.6 }}
+          >
+            <div className="flex flex-row justify-center items-center gap-4 sm:gap-6">
+              <motion.a
+                href="https://discord.gg/u6nn9r4Cy5"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group relative bg-gradient-to-br from-gray-900/50 to-gray-800/30 border border-gray-700/50 rounded-xl px-6 py-4 hover:border-indigo-500/50 hover:shadow-lg hover:shadow-indigo-500/10 transition-all duration-300 flex items-center gap-3"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.7, duration: 0.4 }}
+                whileHover={{ y: -2, scale: 1.02 }}
+              >
+                <div className="w-10 h-10 bg-indigo-500/10 rounded-lg flex items-center justify-center group-hover:bg-indigo-500/20 transition-colors flex-shrink-0">
+                  <DiscordIcon className="w-6 h-6 text-indigo-400" />
+                </div>
+                <div className="text-left">
+                  <h3 className="text-sm font-semibold text-white">Discord</h3>
+                  <p className="text-xs text-gray-400">Join the community</p>
+                </div>
+              </motion.a>
+
+              <motion.a
+                href="https://github.com/Prakshal-Jain/ClawdBody"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group relative bg-gradient-to-br from-gray-900/50 to-gray-800/30 border border-gray-700/50 rounded-xl px-6 py-4 hover:border-rose-500/50 hover:shadow-lg hover:shadow-rose-500/10 transition-all duration-300 flex items-center gap-3"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.8, duration: 0.4 }}
+                whileHover={{ y: -2, scale: 1.02 }}
+              >
+                <div className="w-10 h-10 bg-rose-500/10 rounded-lg flex items-center justify-center group-hover:bg-rose-500/20 transition-colors flex-shrink-0">
+                  <Github className="w-6 h-6 text-rose-400" />
+                </div>
+                <div className="text-left">
+                  <h3 className="text-sm font-semibold text-white">GitHub</h3>
+                  <p className="text-xs text-gray-400">View the source</p>
+                </div>
+              </motion.a>
+            </div>
+          </motion.div>
         </div>
+
+        {/* Twitter Widget Script */}
+        <Script
+          src="https://platform.twitter.com/widgets.js"
+          strategy="lazyOnload"
+          charSet="utf-8"
+        />
 
         {/* How it works */}
         <motion.div
