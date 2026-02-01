@@ -785,7 +785,7 @@ function LearningSourcesContent() {
 
                   <div>
                     <label className="block text-sm font-mono text-sam-text-dim mb-2">
-                      Telegram Bot Token <span className="text-sam-text-dim text-xs">(Optional)</span>
+                      Telegram Bot Token <span className="text-sam-error">*</span>
                     </label>
                     <div className="relative">
                       <input
@@ -801,30 +801,28 @@ function LearningSourcesContent() {
                     </p>
                   </div>
 
-                  {telegramBotToken.trim() && (
-                    <div>
-                      <label className="block text-sm font-mono text-sam-text-dim mb-2">
-                        Telegram User ID <span className="text-sam-text-dim text-xs">(Optional - for allowlist)</span>
-                      </label>
-                      <div className="relative">
-                        <input
-                          type="text"
-                          value={telegramUserId}
-                          onChange={(e) => setTelegramUserId(e.target.value)}
-                          placeholder="123456789"
-                          className="w-full px-4 py-3 rounded-lg bg-sam-bg border border-sam-border focus:border-sam-accent outline-none font-mono text-sm transition-colors"
-                        />
-                      </div>
-                      <p className="mt-2 text-xs text-sam-text-dim">
-                        Your Telegram user ID. Get it from <a href="https://t.me/userinfobot" target="_blank" rel="noopener noreferrer" className="text-sam-accent hover:underline">@userinfobot</a>
-                      </p>
+                  <div>
+                    <label className="block text-sm font-mono text-sam-text-dim mb-2">
+                      Telegram User ID <span className="text-sam-error">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={telegramUserId}
+                        onChange={(e) => setTelegramUserId(e.target.value)}
+                        placeholder="123456789"
+                        className="w-full px-4 py-3 rounded-lg bg-sam-bg border border-sam-border focus:border-sam-accent outline-none font-mono text-sm transition-colors"
+                      />
                     </div>
-                  )}
+                    <p className="mt-2 text-xs text-sam-text-dim">
+                      Your Telegram user ID. Get it from <a href="https://t.me/userinfobot" target="_blank" rel="noopener noreferrer" className="text-sam-accent hover:underline">@userinfobot</a>
+                    </p>
+                  </div>
                 </div>
 
                 <button
                   onClick={handleStartSetup}
-                  disabled={isSubmitting || !claudeApiKey.trim()}
+                  disabled={isSubmitting || !claudeApiKey.trim() || !telegramBotToken.trim() || !telegramUserId.trim()}
                   className="mt-8 w-full flex items-center justify-center gap-2 px-6 py-4 rounded-xl bg-sam-accent text-sam-bg font-display font-semibold hover:bg-sam-accent-dim disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                 >
                   {isSubmitting ? (
@@ -2005,7 +2003,7 @@ function ComputerConnectedView({
                 </div>
                 <div>
                   <label className="block text-[10px] font-mono text-sam-text-dim mb-0.5">
-                    User ID <span className="text-sam-text-dim">(Optional)</span>
+                    User ID <span className="text-sam-error">*</span>
                   </label>
                   <input
                     type="text"
@@ -2014,12 +2012,19 @@ function ComputerConnectedView({
                     placeholder="123456789"
                     className="w-full px-2 py-1.5 rounded bg-sam-bg border border-sam-border focus:border-sam-accent outline-none font-mono text-[10px] transition-colors"
                   />
+                  <p className="mt-0.5 text-[9px] text-sam-text-dim">
+                    Get it from <a href="https://t.me/userinfobot" target="_blank" rel="noopener noreferrer" className="text-sam-accent hover:underline">@userinfobot</a>
+                  </p>
                 </div>
                 <div className="flex items-center gap-1.5 pt-1">
                   <button
                     onClick={async () => {
                       if (!telegramBotToken.trim()) {
                         setTelegramError('Bot token is required')
+                        return
+                      }
+                      if (!telegramUserId.trim()) {
+                        setTelegramError('User ID is required')
                         return
                       }
                       setIsConfiguringTelegram(true)
@@ -2030,7 +2035,7 @@ function ComputerConnectedView({
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({
                             telegramBotToken: telegramBotToken.trim(),
-                            telegramUserId: telegramUserId.trim() || undefined,
+                            telegramUserId: telegramUserId.trim(),
                             vmId: vmId || undefined,
                           }),
                         })
@@ -2053,7 +2058,7 @@ function ComputerConnectedView({
                         setIsConfiguringTelegram(false)
                       }
                     }}
-                    disabled={isConfiguringTelegram || !telegramBotToken.trim()}
+                    disabled={isConfiguringTelegram || !telegramBotToken.trim() || !telegramUserId.trim()}
                     className="flex-1 px-2 py-1.5 rounded bg-sam-accent text-sam-bg hover:bg-sam-accent-dim disabled:opacity-50 disabled:cursor-not-allowed transition-all font-display font-medium text-[10px] flex items-center justify-center gap-1"
                   >
                     {isConfiguringTelegram ? (
