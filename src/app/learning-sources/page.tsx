@@ -144,6 +144,7 @@ interface VMInfo {
   e2bSandboxId?: string
   e2bTemplateId?: string
   e2bTimeout?: number
+  createdAt?: string
 }
 
 // Memory density weights for each source (out of 100 total)
@@ -676,6 +677,7 @@ function LearningSourcesContent() {
             <ComputerConnectedView
               setupStatus={setupStatus}
               vmId={vmId}
+              currentVM={currentVM}
               onStatusUpdate={async () => {
                 // Refresh status
                 const statusUrl = vmId ? `/api/setup/status?vmId=${vmId}` : '/api/setup/status'
@@ -1629,12 +1631,14 @@ function ComputerConnectedView({
   setupStatus,
   onStatusUpdate,
   onDelete,
-  vmId
+  vmId,
+  currentVM
 }: {
   setupStatus: SetupStatus
   onStatusUpdate?: () => Promise<void>
   onDelete: () => Promise<void>
   vmId?: string | null
+  currentVM?: VMInfo | null
 }) {
   const [isDeleting, setIsDeleting] = useState(false)
   // Default to terminal for AWS/E2B (no screen view), screen for Orgo
@@ -1675,6 +1679,67 @@ function ComputerConnectedView({
     } catch (error) {
     } finally {
       setIsDeleting(false)
+    }
+  }
+
+  // Handle VM migration for legacy VMs that don't support WebSocket
+  const [isMigrating, setIsMigrating] = useState(false)
+  
+  const handleMigrate = async () => {
+    const confirmed = confirm(
+      'Your VM was created before the terminal upgrade.\n\n' +
+      'To use the new interactive terminal and chat features, we need to:\n' +
+      '1. Delete your current VM\n' +
+      '2. Create a new VM with the same settings\n' +
+      '3. Reinstall Clawdbot\n\n' +
+      'This will take a few minutes. Continue?'
+    )
+    
+    if (!confirmed) return
+
+    setIsMigrating(true)
+    try {
+      // Save current VM settings before deletion
+      const vmName = currentVM?.name || 'My VM'
+      const vmProvider = currentVM?.provider || setupStatus?.vmProvider || 'orgo'
+      const orgoProjectId = currentVM?.orgoProjectId
+      const orgoProjectName = currentVM?.orgoProjectName
+      
+      // Delete the old VM
+      if (vmId) {
+        const deleteRes = await fetch(`/api/vms/${vmId}`, { method: 'DELETE' })
+        if (!deleteRes.ok) {
+          throw new Error('Failed to delete old VM')
+        }
+      }
+      
+      // Create a new VM with the same settings
+      const createRes = await fetch('/api/vms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: `${vmName}-new`,
+          provider: vmProvider,
+          provisionNow: true,
+          orgoProjectId,
+          orgoProjectName,
+        }),
+      })
+      
+      if (!createRes.ok) {
+        const error = await createRes.json()
+        throw new Error(error.error || 'Failed to create new VM')
+      }
+      
+      const { vm: newVM } = await createRes.json()
+      
+      // Redirect to the new VM's setup page
+      window.location.href = `/learning-sources?vmId=${newVM.id}`
+      
+    } catch (error) {
+      console.error('Migration failed:', error)
+      alert(`Migration failed: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again.`)
+      setIsMigrating(false)
     }
   }
 
@@ -1757,6 +1822,8 @@ function ComputerConnectedView({
             <ClawdbotChat
               vmId={vmId || undefined}
               className="w-full h-full absolute inset-0"
+              vmCreatedAt={currentVM?.createdAt}
+              onMigrate={handleMigrate}
             />
           ) : /* AWS: Interactive Web Terminal */
           setupStatus?.vmProvider === 'aws' && setupStatus?.awsPublicIp ? (
@@ -1805,8 +1872,10 @@ function ComputerConnectedView({
               <OrgoTerminal
                 vmId={vmId || undefined}
                 computerId={setupStatus?.orgoComputerId || undefined}
-                title="Orgo Terminal"
+                title="Terminal"
                 className="w-full h-full"
+                vmCreatedAt={currentVM?.createdAt}
+                onMigrate={handleMigrate}
               />
             ) : (
               // Fallback to VNC for Orgo
@@ -1990,7 +2059,6 @@ function ComputerConnectedView({
                     {isConfiguringTelegram ? (
                       <>
                         <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                        ...
                       </>
                     ) : (
                       'Save'

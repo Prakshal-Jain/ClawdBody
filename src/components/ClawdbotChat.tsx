@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Send, Loader2, Bot, User, AlertCircle, RefreshCw, Sparkles, Zap, Brain, Trash2 } from 'lucide-react'
+import { Send, Loader2, Bot, User, AlertCircle, RefreshCw, Sparkles, Zap, Brain, Trash2, Wifi, WifiOff, AlertTriangle, Plus } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 
 interface Message {
@@ -14,28 +14,295 @@ interface Message {
 interface ClawdbotChatProps {
   vmId?: string
   className?: string
+  /** VM creation date - VMs before Feb 01 2026 2:00 AM PST don't support WebSocket */
+  vmCreatedAt?: Date | string
+  /** Callback to migrate/recreate the VM */
+  onMigrate?: () => void | Promise<void>
 }
 
-export function ClawdbotChat({ vmId, className = '' }: ClawdbotChatProps) {
+interface VMInfo {
+  provider: string
+  orgoComputerId?: string | null
+  createdAt?: string
+}
+
+// End marker to detect when clawdbot command completes
+const CLAWDBOT_END_MARKER = '___CLAWDBOT_RESPONSE_END___'
+
+// Cutoff date: Feb 01, 2026 2:00 AM PST = Feb 01, 2026 10:00 AM UTC
+const WEBSOCKET_SUPPORT_CUTOFF = new Date('2026-02-01T10:00:00Z')
+
+export function ClawdbotChat({ vmId, className = '', vmCreatedAt, onMigrate }: ClawdbotChatProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [isLoadingHistory, setIsLoadingHistory] = useState(true)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [isClearing, setIsClearing] = useState(false)
+  const [wsConnected, setWsConnected] = useState(false)
+  const [vmInfo, setVmInfo] = useState<VMInfo | null>(null)
+  const [isMigrating, setIsMigrating] = useState(false)
+  
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const hasLoadedRef = useRef(false)
+  
+  // WebSocket refs for Orgo
+  const wsRef = useRef<WebSocket | null>(null)
+  const pingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const outputBufferRef = useRef<string>('')
+  const resolveResponseRef = useRef<((response: string) => void) | null>(null)
+  const rejectResponseRef = useRef<((error: Error) => void) | null>(null)
+
+  // Check if VM was created before WebSocket support cutoff
+  const vmCreationDate = vmCreatedAt ? new Date(vmCreatedAt) : (vmInfo?.createdAt ? new Date(vmInfo.createdAt) : null)
+  const isLegacyVM = vmCreationDate ? vmCreationDate < WEBSOCKET_SUPPORT_CUTOFF : false
 
   // Generate a stable session ID based on vmId
   const getSessionId = useCallback(() => {
     if (sessionId) return sessionId
-    // Use vmId as session ID if available, otherwise generate one
     const newSessionId = vmId ? `vm-${vmId}` : `chat-${Date.now()}`
     setSessionId(newSessionId)
     return newSessionId
   }, [vmId, sessionId])
+
+  // Fetch VM info to determine provider
+  useEffect(() => {
+    if (!vmId) return
+
+    const fetchVMInfo = async () => {
+      try {
+        const response = await fetch(`/api/vms/${vmId}`)
+        if (response.ok) {
+          const data = await response.json()
+          const vm = data.vm || data
+          setVmInfo({
+            provider: vm.provider,
+            orgoComputerId: vm.orgoComputerId,
+            createdAt: vm.createdAt,
+          })
+        }
+      } catch (error) {
+        console.error('Failed to fetch VM info:', error)
+      }
+    }
+
+    fetchVMInfo()
+  }, [vmId])
+
+  // Connect to Orgo WebSocket for chat
+  const connectWebSocket = useCallback(() => {
+    if (!vmInfo?.orgoComputerId || vmInfo.provider !== 'orgo') return
+    if (wsRef.current?.readyState === WebSocket.OPEN) return
+
+    // WebSocket URL uses the computer ID as subdomain with 'orgo-' prefix
+    // Format from docs: wss://orgo-{uuid}.orgo.dev/terminal
+    const computerId = vmInfo.orgoComputerId.startsWith('orgo-')
+      ? vmInfo.orgoComputerId
+      : `orgo-${vmInfo.orgoComputerId}`
+    const wsUrl = `wss://${computerId}.orgo.dev/terminal?cols=200&rows=50`
+    console.log('[ClawdbotChat] Connecting to WebSocket:', wsUrl)
+
+    try {
+      const ws = new WebSocket(wsUrl)
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        setWsConnected(true)
+        // Start heartbeat
+        pingIntervalRef.current = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }))
+          }
+        }, 30000)
+      }
+
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data)
+          
+          if (message.type === 'output') {
+            outputBufferRef.current += message.data
+            
+            // Check if we've received the end marker on its own line
+            // This avoids false positives from the command echo
+            // The marker should appear as: \n___CLAWDBOT_RESPONSE_END___\n or at end of output
+            const markerPattern = new RegExp(`(^|\\n)${CLAWDBOT_END_MARKER}(\\r?\\n|$)`)
+            const markerMatch = outputBufferRef.current.match(markerPattern)
+            
+            if (markerMatch && markerMatch.index !== undefined) {
+              const fullOutput = outputBufferRef.current
+              outputBufferRef.current = ''
+              
+              // Extract the response (everything before the marker line)
+              const markerStart = markerMatch.index + (markerMatch[1]?.length || 0)
+              let response = fullOutput.substring(0, markerStart)
+              
+              // Clean up the response
+              response = cleanClawdbotResponse(response)
+              
+              if (resolveResponseRef.current) {
+                resolveResponseRef.current(response)
+                resolveResponseRef.current = null
+                rejectResponseRef.current = null
+              }
+            }
+          } else if (message.type === 'error') {
+            console.error('WebSocket terminal error:', message.message)
+            if (rejectResponseRef.current) {
+              rejectResponseRef.current(new Error(message.message))
+              resolveResponseRef.current = null
+              rejectResponseRef.current = null
+            }
+          }
+        } catch (err) {
+          console.error('Failed to parse WebSocket message:', err)
+        }
+      }
+
+      ws.onerror = () => {
+        setWsConnected(false)
+      }
+
+      ws.onclose = () => {
+        setWsConnected(false)
+        if (pingIntervalRef.current) {
+          clearInterval(pingIntervalRef.current)
+          pingIntervalRef.current = null
+        }
+        // Attempt to reconnect after 5 seconds
+        setTimeout(() => {
+          if (vmInfo?.provider === 'orgo') {
+            connectWebSocket()
+          }
+        }, 5000)
+      }
+
+    } catch (err) {
+      console.error('Failed to connect WebSocket:', err)
+      setWsConnected(false)
+    }
+  }, [vmInfo])
+
+  // Connect WebSocket when VM info is available for Orgo
+  useEffect(() => {
+    if (vmInfo?.provider === 'orgo' && vmInfo.orgoComputerId) {
+      connectWebSocket()
+    }
+
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close()
+        wsRef.current = null
+      }
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current)
+        pingIntervalRef.current = null
+      }
+    }
+  }, [vmInfo, connectWebSocket])
+
+  // Clean up clawdbot response
+  const cleanClawdbotResponse = (response: string): string => {
+    // Remove ALL ANSI escape sequences (not just color codes)
+    // This includes: colors (\x1b[...m), cursor movement, bracketed paste mode (\x1b[?2004h/l), etc.
+    let cleaned = response
+      .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '') // Standard ANSI sequences
+      .replace(/\x1b\][^\x07]*\x07/g, '')     // OSC sequences (title, etc.)
+      .replace(/\x1b[()][AB012]/g, '')        // Character set sequences
+      .replace(/\x1b[=>]/g, '')               // Keypad mode sequences
+    
+    // Also remove sequences that might appear without the escape char (corrupted output)
+    cleaned = cleaned.replace(/\[\?2004[hl]>/g, '') // Bracketed paste mode artifacts
+    cleaned = cleaned.replace(/\[\?2004[hl]/g, '')
+    
+    // Remove carriage returns (terminal artifacts)
+    cleaned = cleaned.replace(/\r/g, '')
+    
+    // Remove the clawdbot command echo and other noise
+    const lines = cleaned.split('\n')
+    const filteredLines = lines.filter(line => {
+      const trimmed = line.trim()
+      // Skip command echo lines (the full command we sent)
+      if (trimmed.includes('clawdbot agent')) return false
+      // Skip source/export lines from bashrc setup
+      if (trimmed.startsWith('source ')) return false
+      if (trimmed.startsWith('export ')) return false
+      // Skip NVM setup lines
+      if (trimmed.includes('NVM_DIR')) return false
+      if (trimmed.includes('nvm.sh')) return false
+      // Skip banner lines
+      if (trimmed.startsWith('🦞')) return false
+      if (trimmed.includes('Clawdbot 20')) return false
+      // Skip empty prompt lines
+      if (trimmed === '$' || trimmed.endsWith('$ ') || /^\w+@[\w-]+:.*\$$/.test(trimmed)) return false
+      // Skip echo command itself
+      if (trimmed.includes('echo "___CLAWDBOT')) return false
+      return true
+    })
+    
+    // Find where actual content starts (after empty lines)
+    let startIndex = 0
+    while (startIndex < filteredLines.length && filteredLines[startIndex].trim() === '') {
+      startIndex++
+    }
+    
+    // Find where actual content ends (before trailing empty lines and prompts)
+    let endIndex = filteredLines.length - 1
+    while (endIndex > startIndex && filteredLines[endIndex].trim() === '') {
+      endIndex--
+    }
+    
+    cleaned = filteredLines.slice(startIndex, endIndex + 1).join('\n').trim()
+    
+    return cleaned || 'The AI responded but the output was empty.'
+  }
+
+  // Send message via WebSocket (for Orgo)
+  const sendViaWebSocket = useCallback(async (message: string, chatSessionId: string): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'))
+        return
+      }
+
+      // Clear buffer and set up response handlers
+      outputBufferRef.current = ''
+      resolveResponseRef.current = resolve
+      rejectResponseRef.current = reject
+
+      // Escape message for shell
+      const escapedMessage = message
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"')
+        .replace(/`/g, '\\`')
+        .replace(/\$/g, '\\$')
+
+      // Build the clawdbot command with end marker
+      const command = `source ~/.bashrc 2>/dev/null; export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; clawdbot agent --local --session-id "${chatSessionId}" --message "${escapedMessage}"; echo "${CLAWDBOT_END_MARKER}"`
+
+      // Send the command
+      wsRef.current.send(JSON.stringify({ type: 'input', data: command + '\r' }))
+
+      // Set timeout for response (3 minutes)
+      setTimeout(() => {
+        if (resolveResponseRef.current === resolve) {
+          // Still waiting for this response
+          const partialOutput = cleanClawdbotResponse(outputBufferRef.current)
+          outputBufferRef.current = ''
+          resolveResponseRef.current = null
+          rejectResponseRef.current = null
+          
+          if (partialOutput && partialOutput !== 'No response received') {
+            resolve(partialOutput + '\n\n(Response may be incomplete due to timeout)')
+          } else {
+            reject(new Error('Response timeout - the AI may still be thinking'))
+          }
+        }
+      }, 180000) // 3 minutes
+    })
+  }, [])
 
   // Load chat history on mount
   useEffect(() => {
@@ -48,7 +315,6 @@ export function ClawdbotChat({ vmId, className = '' }: ClawdbotChatProps) {
         if (vmId) {
           params.set('vmId', vmId)
         }
-        // Also try to load by session if we have one
         const currentSessionId = vmId ? `vm-${vmId}` : null
         if (currentSessionId) {
           params.set('sessionId', currentSessionId)
@@ -58,7 +324,6 @@ export function ClawdbotChat({ vmId, className = '' }: ClawdbotChatProps) {
         if (response.ok) {
           const data = await response.json()
           if (data.messages && data.messages.length > 0) {
-            // Convert database messages to UI format
             const loadedMessages: Message[] = data.messages.map((msg: any) => ({
               id: msg.id,
               role: msg.role as 'user' | 'assistant' | 'error',
@@ -66,22 +331,17 @@ export function ClawdbotChat({ vmId, className = '' }: ClawdbotChatProps) {
               timestamp: new Date(msg.createdAt),
             }))
             setMessages(loadedMessages)
-            // Set session ID from first message if available
             if (data.messages[0]?.sessionId) {
               setSessionId(data.messages[0].sessionId)
             }
             
-            // Check if the last message is from the user and was sent recently
-            // This indicates a response might still be pending (user refreshed during loading)
             const lastMessage = loadedMessages[loadedMessages.length - 1]
             if (lastMessage && lastMessage.role === 'user') {
               const timeSinceLastMessage = Date.now() - lastMessage.timestamp.getTime()
               const TWO_MINUTES = 2 * 60 * 1000
               if (timeSinceLastMessage < TWO_MINUTES) {
-                // Show loading indicator - response might still be coming
                 setIsLoading(true)
-                // Auto-clear loading after a timeout in case the response was lost
-                setTimeout(() => setIsLoading(false), 60000) // Clear after 1 minute
+                setTimeout(() => setIsLoading(false), 60000)
               }
             }
           }
@@ -114,7 +374,7 @@ export function ClawdbotChat({ vmId, className = '' }: ClawdbotChatProps) {
     }
   }
 
-  // Auto-scroll to bottom when new messages arrive (within container only, not the page)
+  // Auto-scroll to bottom
   const scrollToBottom = useCallback(() => {
     if (messagesContainerRef.current) {
       messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight
@@ -125,7 +385,7 @@ export function ClawdbotChat({ vmId, className = '' }: ClawdbotChatProps) {
     scrollToBottom()
   }, [messages, scrollToBottom])
 
-  // Focus input on mount (after loading completes)
+  // Focus input on mount
   useEffect(() => {
     if (!isLoadingHistory) {
       inputRef.current?.focus()
@@ -152,38 +412,45 @@ export function ClawdbotChat({ vmId, className = '' }: ClawdbotChatProps) {
     saveMessage('user', userMessage.content, currentSessionId)
 
     try {
-      const response = await fetch('/api/chat/clawdbot', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: userMessage.content,
-          vmId,
-          sessionId: currentSessionId,
-        }),
-      })
+      let response: string
 
-      const data = await response.json()
+      // Use WebSocket for Orgo, API for others
+      if (vmInfo?.provider === 'orgo' && wsConnected) {
+        response = await sendViaWebSocket(userMessage.content, currentSessionId)
+      } else {
+        // Fall back to API route for non-Orgo or if WebSocket not connected
+        const apiResponse = await fetch('/api/chat/clawdbot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: userMessage.content,
+            vmId,
+            sessionId: currentSessionId,
+          }),
+        })
 
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to send message')
-      }
+        const data = await apiResponse.json()
 
-      // Store session ID for continued conversation
-      if (data.sessionId) {
-        setSessionId(data.sessionId)
+        if (!apiResponse.ok) {
+          throw new Error(data.error || 'Failed to send message')
+        }
+
+        if (data.sessionId) {
+          setSessionId(data.sessionId)
+        }
+
+        response = data.response || 'No response received'
       }
 
       const assistantMessage: Message = {
         id: `assistant-${Date.now()}`,
         role: 'assistant',
-        content: data.response || 'No response received',
+        content: response,
         timestamp: new Date(),
       }
 
       setMessages(prev => [...prev, assistantMessage])
-      
-      // Save assistant message to database
-      saveMessage('assistant', assistantMessage.content, data.sessionId || currentSessionId)
+      saveMessage('assistant', assistantMessage.content, currentSessionId)
 
     } catch (error) {
       const errorMessage: Message = {
@@ -193,8 +460,6 @@ export function ClawdbotChat({ vmId, className = '' }: ClawdbotChatProps) {
         timestamp: new Date(),
       }
       setMessages(prev => [...prev, errorMessage])
-      
-      // Save error message to database too
       saveMessage('error', errorMessage.content, currentSessionId)
     } finally {
       setIsLoading(false)
@@ -214,7 +479,6 @@ export function ClawdbotChat({ vmId, className = '' }: ClawdbotChatProps) {
     
     setIsClearing(true)
     try {
-      // Delete from database
       const params = new URLSearchParams()
       if (vmId) {
         params.set('vmId', vmId)
@@ -228,7 +492,6 @@ export function ClawdbotChat({ vmId, className = '' }: ClawdbotChatProps) {
         })
       }
       
-      // Clear local state
       setMessages([])
       setSessionId(null)
     } catch (error) {
@@ -244,7 +507,6 @@ export function ClawdbotChat({ vmId, className = '' }: ClawdbotChatProps) {
     { text: 'Summarize my projects', icon: Sparkles },
   ]
 
-  // Show loading state while fetching history
   if (isLoadingHistory) {
     return (
       <div className={`flex flex-col h-full items-center justify-center ${className}`}>
@@ -254,14 +516,76 @@ export function ClawdbotChat({ vmId, className = '' }: ClawdbotChatProps) {
     )
   }
 
+  // Show migration UI for legacy VMs (Orgo only)
+  if (isLegacyVM && vmInfo?.provider === 'orgo') {
+    return (
+      <div className={`flex flex-col h-full items-center justify-center p-8 text-center ${className}`}>
+        <div className="w-16 h-16 rounded-full bg-yellow-500/20 flex items-center justify-center mb-6">
+          <AlertTriangle className="w-8 h-8 text-yellow-500" />
+        </div>
+        
+        <h3 className="text-xl font-bold text-sam-text mb-3">
+          Chat Has Been Upgraded
+        </h3>
+        
+        <p className="text-sam-text-dim text-sm max-w-md mb-6 leading-relaxed">
+          We've upgraded our chat experience.
+          To use the new real-time chat with Clawdbot, please move to a new VM.
+        </p>
+        
+        <div className="flex flex-col gap-3 w-full max-w-xs">
+          {onMigrate && (
+            <button
+              onClick={async () => {
+                setIsMigrating(true)
+                try {
+                  await onMigrate()
+                } catch {
+                  setIsMigrating(false)
+                }
+              }}
+              disabled={isMigrating}
+              className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-sam-accent text-sam-bg font-medium hover:bg-sam-accent-dim transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isMigrating ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Plus className="w-4 h-4" />
+              )}
+              {isMigrating ? 'Migrating...' : 'Migrate to New VM'}
+            </button>
+          )}
+          <p className="text-sam-text-dim/60 text-xs">
+            This will delete your current VM and create a new one with all features enabled.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className={`flex flex-col h-full ${className}`}>
+      {/* Connection status indicator for Orgo */}
+      {vmInfo?.provider === 'orgo' && (
+        <div className="flex items-center justify-center gap-2 py-1.5 px-3 bg-sam-surface/30 border-b border-sam-border">
+          {wsConnected ? (
+            <>
+              <Wifi className="w-3 h-3 text-green-500" />
+              <span className="text-xs text-green-500">Connected</span>
+            </>
+          ) : (
+            <>
+              <WifiOff className="w-3 h-3 text-yellow-500" />
+              <span className="text-xs text-yellow-500">Connecting...</span>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Messages area */}
       <div ref={messagesContainerRef} className="flex-1 overflow-y-auto min-h-0">
         {messages.length === 0 ? (
-          /* Empty state - clean and centered */
           <div className="flex flex-col items-center justify-center h-full px-6 py-8">
-            {/* Animated bot icon */}
             <motion.div 
               initial={{ scale: 0.8, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -292,7 +616,6 @@ export function ClawdbotChat({ vmId, className = '' }: ClawdbotChatProps) {
               </p>
             </motion.div>
 
-            {/* Suggestion chips */}
             <motion.div 
               initial={{ y: 20, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
@@ -315,9 +638,7 @@ export function ClawdbotChat({ vmId, className = '' }: ClawdbotChatProps) {
             </motion.div>
           </div>
         ) : (
-          /* Messages list */
           <div className="p-4 space-y-4">
-            {/* Session indicator with clear button */}
             <div className="flex items-center justify-center gap-2 mb-4">
               <div className="h-px flex-1 bg-sam-border" />
               <span className="text-xs text-sam-text-dim px-3 py-1 rounded-full bg-sam-surface/50 border border-sam-border">
@@ -349,7 +670,6 @@ export function ClawdbotChat({ vmId, className = '' }: ClawdbotChatProps) {
                   transition={{ duration: 0.2 }}
                   className={`flex gap-3 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}
                 >
-                  {/* Avatar */}
                   <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
                     message.role === 'user' 
                       ? 'bg-sam-accent' 
@@ -366,7 +686,6 @@ export function ClawdbotChat({ vmId, className = '' }: ClawdbotChatProps) {
                     )}
                   </div>
 
-                  {/* Message bubble */}
                   <div className={`max-w-[75%] rounded-2xl px-4 py-3 ${
                     message.role === 'user'
                       ? 'bg-sam-accent text-sam-bg rounded-tr-md'
@@ -385,7 +704,6 @@ export function ClawdbotChat({ vmId, className = '' }: ClawdbotChatProps) {
               ))}
             </AnimatePresence>
 
-            {/* Loading indicator */}
             {isLoading && (
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
@@ -418,7 +736,7 @@ export function ClawdbotChat({ vmId, className = '' }: ClawdbotChatProps) {
         )}
       </div>
 
-      {/* Input area - prominent and connected */}
+      {/* Input area */}
       <div className="p-4 bg-gradient-to-t from-sam-bg via-sam-bg to-transparent">
         <div className="flex gap-3">
           <textarea

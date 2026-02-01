@@ -5,7 +5,10 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
-import { Loader2, Terminal, RefreshCw, Maximize2, Minimize2 } from 'lucide-react'
+import { Loader2, Terminal, RefreshCw, Maximize2, Minimize2, Wifi, WifiOff, AlertTriangle, Trash2, Plus } from 'lucide-react'
+
+// Cutoff date: Feb 01, 2026 2:00 AM PST = Feb 01, 2026 10:00 AM UTC
+const WEBSOCKET_SUPPORT_CUTOFF = new Date('2026-02-01T10:00:00Z')
 
 interface OrgoTerminalProps {
   /** VM ID for the Orgo computer */
@@ -18,325 +21,295 @@ interface OrgoTerminalProps {
   className?: string
   /** Callback when terminal is ready */
   onReady?: () => void
+  /** VM creation date - VMs before Feb 01 2026 2:00 AM PST don't support WebSocket */
+  vmCreatedAt?: Date | string
+  /** Callback to migrate/recreate the VM */
+  onMigrate?: () => void | Promise<void>
 }
 
 type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
 
+// WebSocket message types
+interface TerminalOutputMessage {
+  type: 'output'
+  data: string
+}
+
+interface TerminalErrorMessage {
+  type: 'error'
+  message: string
+}
+
+interface TerminalExitMessage {
+  type: 'exit'
+  code: number
+}
+
+interface TerminalPongMessage {
+  type: 'pong'
+}
+
+type TerminalMessage = TerminalOutputMessage | TerminalErrorMessage | TerminalExitMessage | TerminalPongMessage
+
+/**
+ * OrgoTerminal - Interactive terminal using Orgo's WebSocket API
+ * 
+ * Connects directly to wss://{computer_id}.orgo.dev/terminal for a full PTY experience.
+ * Docs: https://docs.orgo.ai/api-reference/computers/terminal
+ */
 export function OrgoTerminal({
   vmId,
-  computerId,
-  title = 'Orgo Terminal',
+  computerId: propComputerId,
+  title = 'Terminal',
   className = '',
   onReady,
+  vmCreatedAt,
+  onMigrate,
 }: OrgoTerminalProps) {
+  // Check if VM was created before WebSocket support cutoff
+  const isLegacyVM = vmCreatedAt
+    ? new Date(vmCreatedAt) < WEBSOCKET_SUPPORT_CUTOFF
+    : false
+
   const terminalRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
-  const currentLineRef = useRef<string>('')
-  const cursorPosRef = useRef<number>(0)  // Cursor position within current line
-  const historyRef = useRef<string[]>([])
-  const historyIndexRef = useRef<number>(-1)
-  const cwdRef = useRef<string>('~')
-  const absoluteCwdRef = useRef<string>('')  // Full path for command prefixing
-  const isExecutingRef = useRef<boolean>(false)
-  const handleTabCompleteRef = useRef<((term: XTerm) => Promise<void>) | null>(null)
+  const wsRef = useRef<WebSocket | null>(null)
+  const pingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const reconnectAttemptRef = useRef<number>(0)
+  const isConnectingRef = useRef<boolean>(false)
+  const wasConnectedRef = useRef<boolean>(false) // Track if we ever connected successfully
+  const maxReconnectAttempts = 3 // Limit reconnection attempts
   
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected')
   const [error, setError] = useState<string | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [resolvedComputerId, setResolvedComputerId] = useState<string | null>(propComputerId || null)
+  const [xtermReady, setXtermReady] = useState(false)
+  const [isMigrating, setIsMigrating] = useState(false)
 
-  // Execute command via API
-  const executeCommand = useCallback(async (command: string): Promise<{ output: string; exitCode: number }> => {
-    const response = await fetch('/api/terminal/orgo/execute', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        command,
-        vmId,
-        computerId,
-      }),
-    })
-
-    if (!response.ok) {
-      const data = await response.json()
-      throw new Error(data.error || 'Failed to execute command')
+  // Resolve computer ID from vmId if needed
+  useEffect(() => {
+    if (propComputerId) {
+      setResolvedComputerId(propComputerId)
+      return
     }
 
-    return response.json()
-  }, [vmId, computerId])
-
-  // Get current working directory
-  const updateCwd = useCallback(async (newPath?: string) => {
-    try {
-      // If a new path is provided (from cd command), resolve it
-      let command = 'pwd'
-      if (newPath) {
-        // Expand ~ to home directory and resolve the path
-        command = `cd ${newPath} 2>/dev/null && pwd`
-      }
-      
-      const result = await executeCommand(command)
-      const cwd = result.output.trim()
-      
-      if (cwd) {
-        absoluteCwdRef.current = cwd
-        // Shorten home directory to ~ for display
-        cwdRef.current = cwd.replace(/^\/home\/[^/]+/, '~').replace(/^\/root/, '~')
-      }
-    } catch {
-      // Keep current cwd on error
+    if (!vmId) {
+      setError('No VM or computer ID provided')
+      setConnectionState('error')
+      return
     }
-  }, [executeCommand])
 
-  // Write prompt to terminal
-  const writePrompt = useCallback(() => {
-    if (!xtermRef.current) return
-    xtermRef.current.write(`\r\n\x1b[1;32morgo\x1b[0m:\x1b[1;34m${cwdRef.current}\x1b[0m$ `)
+    // Fetch the VM to get the Orgo computer ID
+    const fetchComputerId = async () => {
+      try {
+        const response = await fetch(`/api/vms/${vmId}`)
+        if (!response.ok) {
+          throw new Error('Failed to fetch VM details')
+        }
+        const data = await response.json()
+        const vm = data.vm || data // Handle both { vm: {...} } and direct object
+        console.log('[OrgoTerminal] Fetched VM:', { provider: vm.provider, orgoComputerId: vm.orgoComputerId })
+        if (vm.provider !== 'orgo' || !vm.orgoComputerId) {
+          throw new Error('VM is not an Orgo computer or missing computer ID')
+        }
+        setResolvedComputerId(vm.orgoComputerId)
+    } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to resolve computer ID')
+        setConnectionState('error')
+      }
+    }
+
+    fetchComputerId()
+  }, [vmId, propComputerId])
+
+  // Start heartbeat ping
+  const startHeartbeat = useCallback(() => {
+    if (pingIntervalRef.current) {
+      clearInterval(pingIntervalRef.current)
+    }
+
+    // Send ping every 30 seconds
+    pingIntervalRef.current = setInterval(() => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'ping' }))
+      }
+    }, 30000)
   }, [])
 
-  // Handle command execution
-  const handleCommand = useCallback(async (command: string) => {
-    if (!xtermRef.current || isExecutingRef.current) return
-
-    const trimmedCommand = command.trim()
-    
-    // Add to history if not empty and not duplicate
-    if (trimmedCommand && historyRef.current[historyRef.current.length - 1] !== trimmedCommand) {
-      historyRef.current.push(trimmedCommand)
+  // Stop heartbeat
+  const stopHeartbeat = useCallback(() => {
+    if (pingIntervalRef.current) {
+      clearInterval(pingIntervalRef.current)
+      pingIntervalRef.current = null
     }
-    historyIndexRef.current = -1
+  }, [])
 
-    if (!trimmedCommand) {
-      writePrompt()
-      return
-    }
-
-    // Handle special commands
-    if (trimmedCommand === 'clear') {
-      xtermRef.current.write('\x1b[2J\x1b[H') // Clear screen and move cursor to top
-      writePrompt()
-      return
-    }
-
-    isExecutingRef.current = true
-    xtermRef.current.write('\r\n')
-
-    try {
-      // Check if this is a cd command
-      const cdMatch = trimmedCommand.match(/^cd\s*(.*)$/)
-      
-      if (cdMatch) {
-        // Handle cd command - update the tracked directory
-        const targetPath = cdMatch[1].trim() || '~'
-        
-        // Resolve the path relative to current directory
-        let resolveCommand: string
-        if (targetPath.startsWith('/')) {
-          // Absolute path
-          resolveCommand = `cd ${targetPath} 2>&1 && pwd`
-        } else if (targetPath === '~' || targetPath.startsWith('~/')) {
-          // Home-relative path
-          resolveCommand = `cd ${targetPath} 2>&1 && pwd`
-        } else {
-          // Relative path - need to cd to current dir first
-          resolveCommand = absoluteCwdRef.current 
-            ? `cd ${absoluteCwdRef.current} && cd ${targetPath} 2>&1 && pwd`
-            : `cd ${targetPath} 2>&1 && pwd`
-        }
-        
-        const result = await executeCommand(resolveCommand)
-        const output = result.output.trim()
-        
-        // Check if it's an error message or a valid path
-        if (output.startsWith('/')) {
-          absoluteCwdRef.current = output
-          cwdRef.current = output.replace(/^\/home\/[^/]+/, '~').replace(/^\/root/, '~')
-        } else if (output) {
-          // It's an error message
-          xtermRef.current.write(`\x1b[31m${output}\x1b[0m\r\n`)
-        }
-      } else {
-        // Regular command - prefix with cd to current directory
-        let fullCommand = trimmedCommand
-        if (absoluteCwdRef.current) {
-          fullCommand = `cd ${absoluteCwdRef.current} && ${trimmedCommand}`
-        }
-        
-        const result = await executeCommand(fullCommand)
-        
-        // Write output
-        if (result.output) {
-          // Handle output - replace \n with \r\n for proper terminal display
-          const formattedOutput = result.output.replace(/\n/g, '\r\n')
-          xtermRef.current.write(formattedOutput)
-          
-          // Ensure we end with a newline if output doesn't have one
-          if (!result.output.endsWith('\n')) {
-            xtermRef.current.write('\r\n')
-          }
-        }
-      }
-
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Command failed'
-      // Show user-friendly message for timeouts
-      if (errorMessage.includes('timed out')) {
-        xtermRef.current.write(`\x1b[33mRequest timed out. The command may still be running on the server.\x1b[0m\r\n`)
-      } else {
-        xtermRef.current.write(`\x1b[31m${errorMessage}\x1b[0m\r\n`)
-      }
-    } finally {
-      isExecutingRef.current = false
-      writePrompt()
-    }
-  }, [executeCommand, writePrompt])
-
-  // Execute command with timeout (for tab completion)
-  const executeWithTimeout = useCallback(async (command: string, timeoutMs: number = 5000) => {
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('Tab completion timed out')), timeoutMs)
-    })
-    return Promise.race([executeCommand(command), timeoutPromise])
-  }, [executeCommand])
-
-  // Handle tab completion
-  const handleTabComplete = useCallback(async (term: XTerm) => {
-    if (isExecutingRef.current) return
-    
-    const input = currentLineRef.current
-    if (!input) return
-    
-    // Get the word being completed (last word in input)
-    const words = input.split(/\s+/)
-    const lastWord = words[words.length - 1] || ''
-    const prefix = words.slice(0, -1).join(' ')
-    
-    try {
-      isExecutingRef.current = true
-      
-      // Build completion command
-      let compCommand: string
-      const cwdPrefix = absoluteCwdRef.current ? `cd ${absoluteCwdRef.current} && ` : ''
-      
-      if (words.length === 1 && !input.includes(' ')) {
-        // Completing a command - use compgen -c for commands
-        compCommand = `${cwdPrefix}compgen -c -- "${lastWord}" 2>/dev/null | head -20`
-      } else {
-        // Completing a file/directory path - use compgen -f
-        compCommand = `${cwdPrefix}compgen -f -- "${lastWord}" 2>/dev/null | head -20`
-      }
-      
-      // Use shorter timeout for tab completion (5 seconds)
-      const result = await executeWithTimeout(compCommand, 5000)
-      const completions = result.output.trim().split('\n').filter(c => c)
-      
-      if (completions.length === 0) {
-        // No completions - do nothing
-      } else if (completions.length === 1) {
-        // Single completion - auto-complete
-        const completion = completions[0]
-        const toAdd = completion.slice(lastWord.length)
-        
-        if (toAdd) {
-          currentLineRef.current += toAdd
-          cursorPosRef.current += toAdd.length
-          term.write(toAdd)
-        }
-        
-        // Check if it's a directory and add /
-        const isDir = await executeWithTimeout(`${cwdPrefix}test -d "${completion}" && echo "dir"`, 3000)
-        if (isDir.output.trim() === 'dir' && !completion.endsWith('/')) {
-          currentLineRef.current += '/'
-          cursorPosRef.current++
-          term.write('/')
-        } else if (isDir.output.trim() !== 'dir') {
-          // Add space after non-directory completions
-          currentLineRef.current += ' '
-          cursorPosRef.current++
-          term.write(' ')
-        }
-      } else {
-        // Multiple completions - find common prefix and show options
-        const commonPrefix = findCommonPrefix(completions)
-        const toAdd = commonPrefix.slice(lastWord.length)
-        
-        if (toAdd) {
-          // Add the common prefix
-          currentLineRef.current += toAdd
-          cursorPosRef.current += toAdd.length
-          term.write(toAdd)
-        } else {
-          // Show all completions
-          term.write('\r\n')
-          term.write(completions.join('  '))
-          term.write(`\r\n\x1b[1;32morgo\x1b[0m:\x1b[1;34m${cwdRef.current}\x1b[0m$ `)
-          term.write(currentLineRef.current)
-        }
-      }
-    } catch (err) {
-      // Show timeout errors to user, silently fail on other errors
-      const errorMessage = err instanceof Error ? err.message : ''
-      if (errorMessage.includes('timed out')) {
-        term.write('\r\n\x1b[33m[Tab completion timed out]\x1b[0m')
-        term.write(`\r\n\x1b[1;32morgo\x1b[0m:\x1b[1;34m${cwdRef.current}\x1b[0m$ `)
-        term.write(currentLineRef.current)
-      }
-    } finally {
-      isExecutingRef.current = false
-    }
-  }, [executeWithTimeout])
-
-  // Keep ref updated for use in event handlers
-  handleTabCompleteRef.current = handleTabComplete
-
-  // Helper to find common prefix of strings
-  const findCommonPrefix = (strings: string[]): string => {
-    if (strings.length === 0) return ''
-    if (strings.length === 1) return strings[0]
-    
-    let prefix = strings[0]
-    for (let i = 1; i < strings.length; i++) {
-      while (strings[i].indexOf(prefix) !== 0) {
-        prefix = prefix.slice(0, -1)
-        if (prefix === '') return ''
-      }
-    }
-    return prefix
-  }
-
-  // Connect to terminal
+  // Connect to WebSocket terminal
   const connect = useCallback(async () => {
-    if (connectionState === 'connected') return
+    if (!resolvedComputerId || isConnectingRef.current) return
+    if (wsRef.current?.readyState === WebSocket.OPEN) return
 
+    isConnectingRef.current = true
     setConnectionState('connecting')
     setError(null)
 
+    // Get terminal dimensions
+    const cols = xtermRef.current?.cols || 80
+    const rows = xtermRef.current?.rows || 24
+
+    // WebSocket URL uses the computer ID as subdomain with 'orgo-' prefix
+    // Format from docs: wss://orgo-{uuid}.orgo.dev/terminal
+    // Add 'orgo-' prefix if not already present
+    const computerId = resolvedComputerId.startsWith('orgo-')
+      ? resolvedComputerId
+      : `orgo-${resolvedComputerId}`
+    const wsUrl = `wss://${computerId}.orgo.dev/terminal?cols=${cols}&rows=${rows}`
+    console.log('[OrgoTerminal] Raw computer ID:', resolvedComputerId)
+    console.log('[OrgoTerminal] Connecting to WebSocket:', wsUrl)
+
     try {
-      // Initialize to home directory
-      const result = await executeCommand('cd ~ && pwd')
-      const homePath = result.output.trim()
-      if (homePath.startsWith('/')) {
-        absoluteCwdRef.current = homePath
-        cwdRef.current = '~'
-      }
-      
+      const ws = new WebSocket(wsUrl)
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        console.log('[OrgoTerminal] WebSocket connected!')
+        isConnectingRef.current = false
       setConnectionState('connected')
+        // Note: Don't reset reconnectAttemptRef here - wait until we receive actual output
+        // This prevents infinite reconnect loops if connection opens but immediately closes
       
-      // Write welcome message and first prompt
+        // Clear terminal and show connection message
       if (xtermRef.current) {
         xtermRef.current.clear()
-        xtermRef.current.write('\x1b[1;33m  Orgo Terminal\x1b[0m\r\n')
-        xtermRef.current.write('\x1b[90m  Connected to your Orgo computer\x1b[0m\r\n')
-        xtermRef.current.write(`\r\n\x1b[1;32morgo\x1b[0m:\x1b[1;34m${cwdRef.current}\x1b[0m$ `)
         xtermRef.current.focus()
       }
 
+        startHeartbeat()
       onReady?.()
+      }
+
+      ws.onmessage = (event) => {
+        try {
+          const message: TerminalMessage = JSON.parse(event.data)
+
+          switch (message.type) {
+            case 'output':
+              // Mark as truly connected once we receive actual output
+              if (!wasConnectedRef.current) {
+                wasConnectedRef.current = true
+                reconnectAttemptRef.current = 0 // Reset reconnect counter on successful connection
+              }
+              xtermRef.current?.write(message.data)
+              break
+            case 'error':
+              console.error('Terminal error:', message.message)
+              xtermRef.current?.write(`\r\n\x1b[31mError: ${message.message}\x1b[0m\r\n`)
+              break
+            case 'exit':
+              console.log('Shell exited with code:', message.code)
+              xtermRef.current?.write(`\r\n\x1b[33mShell exited with code: ${message.code}\x1b[0m\r\n`)
+              // Attempt to reconnect after shell exit
+              scheduleReconnect()
+              break
+            case 'pong':
+              // Heartbeat acknowledged
+              break
+          }
+        } catch (err) {
+          console.error('Failed to parse WebSocket message:', err)
+        }
+      }
+
+      ws.onerror = (event) => {
+        console.error('[OrgoTerminal] WebSocket error:', event)
+        // Error will be followed by onclose, so just log here
+      }
+
+      ws.onclose = (event) => {
+        console.log('[OrgoTerminal] WebSocket closed:', { code: event.code, reason: event.reason, wasClean: event.wasClean, wasConnected: wasConnectedRef.current })
+        isConnectingRef.current = false
+        stopHeartbeat()
+
+        // Reset wasConnected - we're no longer connected
+        const hadSuccessfulConnection = wasConnectedRef.current
+        wasConnectedRef.current = false
+
+        // Only attempt reconnect if we had a real connection (received output) and haven't exceeded attempts
+        if (hadSuccessfulConnection && reconnectAttemptRef.current < maxReconnectAttempts) {
+          setConnectionState('disconnected')
+          xtermRef.current?.write('\r\n\x1b[33mConnection lost. Reconnecting...\x1b[0m\r\n')
+          scheduleReconnect()
+        } else if (hadSuccessfulConnection) {
+          setConnectionState('error')
+          setError('Connection lost. Max reconnection attempts reached.')
+          xtermRef.current?.write('\r\n\x1b[31mMax reconnection attempts reached. Click Reconnect to try again.\x1b[0m\r\n')
+        } else {
+          // Initial connection failed - don't auto-reconnect
+          setConnectionState('error')
+          setError(`Failed to connect (code: ${event.code})`)
+        }
+      }
+
     } catch (err) {
+      isConnectingRef.current = false
       setConnectionState('error')
       setError(err instanceof Error ? err.message : 'Failed to connect')
     }
-  }, [connectionState, updateCwd, writePrompt, onReady])
+  }, [resolvedComputerId, startHeartbeat, stopHeartbeat, onReady])
+
+  // Schedule reconnect with exponential backoff
+  const scheduleReconnect = useCallback(() => {
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current)
+    }
+
+    // Calculate backoff: 2s, 4s, 8s, 16s, max 30s
+    const baseDelay = 2000
+    const maxDelay = 30000
+    const delay = Math.min(baseDelay * Math.pow(2, reconnectAttemptRef.current), maxDelay)
+
+    reconnectAttemptRef.current++
+
+    reconnectTimeoutRef.current = setTimeout(() => {
+      if (wsRef.current?.readyState !== WebSocket.OPEN) {
+        connect()
+      }
+    }, delay)
+  }, [connect])
+
+  // Disconnect WebSocket
+  const disconnect = useCallback(() => {
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current)
+      reconnectTimeoutRef.current = null
+    }
+
+    stopHeartbeat()
+
+    if (wsRef.current) {
+      wsRef.current.close()
+      wsRef.current = null
+    }
+
+    setConnectionState('disconnected')
+  }, [stopHeartbeat])
+
+  // Send input to terminal
+  const sendInput = useCallback((data: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'input', data }))
+    }
+  }, [])
+
+  // Send resize message
+  const sendResize = useCallback((cols: number, rows: number) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }))
+    }
+  }, [])
 
   // Initialize xterm
   useEffect(() => {
@@ -383,157 +356,9 @@ export function OrgoTerminal({
     term.open(terminalRef.current)
     setTimeout(() => fitAddon.fit(), 0)
 
-    // Add direct keydown listener to capture Tab before browser handles it
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Tab') {
-        event.preventDefault()
-        event.stopPropagation()
-        if (!isExecutingRef.current && handleTabCompleteRef.current) {
-          handleTabCompleteRef.current(term)
-        }
-      }
-    }
-    
-    // Use capture phase to intercept before other handlers
-    terminalRef.current.addEventListener('keydown', handleKeyDown, true)
-
-    // Intercept special keys BEFORE xterm processes them
-    term.attachCustomKeyEventHandler((event) => {
-      // Only handle keydown events
-      if (event.type !== 'keydown') return true
-      
-      if (isExecutingRef.current) return false
-      
-      // Tab is handled by the direct event listener above
-      if (event.key === 'Tab') {
-        return false
-      }
-      
-      // Handle arrow keys directly here
-      if (event.key === 'ArrowLeft') {
-        if (cursorPosRef.current > 0) {
-          cursorPosRef.current--
-          term.write('\x1b[D')
-        }
-        return false
-      }
-      
-      if (event.key === 'ArrowRight') {
-        if (cursorPosRef.current < currentLineRef.current.length) {
-          cursorPosRef.current++
-          term.write('\x1b[C')
-        }
-        return false
-      }
-      
-      if (event.key === 'ArrowUp') {
-        if (historyRef.current.length > 0) {
-          if (historyIndexRef.current === -1) {
-            historyIndexRef.current = historyRef.current.length - 1
-          } else if (historyIndexRef.current > 0) {
-            historyIndexRef.current--
-          } else {
-            return false // Already at oldest
-          }
-          
-          // Clear current line - move to end first, then clear
-          const moveRight = currentLineRef.current.length - cursorPosRef.current
-          if (moveRight > 0) term.write('\x1b[' + moveRight + 'C')
-          term.write('\b \b'.repeat(currentLineRef.current.length))
-          
-          // Write history item
-          currentLineRef.current = historyRef.current[historyIndexRef.current]
-          cursorPosRef.current = currentLineRef.current.length
-          term.write(currentLineRef.current)
-        }
-        return false
-      }
-      
-      if (event.key === 'ArrowDown') {
-        if (historyIndexRef.current !== -1) {
-          // Clear current line - move to end first, then clear
-          const moveRight = currentLineRef.current.length - cursorPosRef.current
-          if (moveRight > 0) term.write('\x1b[' + moveRight + 'C')
-          term.write('\b \b'.repeat(currentLineRef.current.length))
-          
-          if (historyIndexRef.current < historyRef.current.length - 1) {
-            historyIndexRef.current++
-            currentLineRef.current = historyRef.current[historyIndexRef.current]
-            cursorPosRef.current = currentLineRef.current.length
-            term.write(currentLineRef.current)
-          } else {
-            historyIndexRef.current = -1
-            currentLineRef.current = ''
-            cursorPosRef.current = 0
-          }
-        }
-        return false
-      }
-      
-      return true // Let xterm handle other keys
-    })
-
-    // Handle keyboard input
-    term.onKey(({ key, domEvent }) => {
-      if (isExecutingRef.current) return
-
-      const printable = !domEvent.altKey && !domEvent.ctrlKey && !domEvent.metaKey
-
-      if (domEvent.keyCode === 13) {
-        // Enter - execute command
-        const command = currentLineRef.current
-        currentLineRef.current = ''
-        cursorPosRef.current = 0
-        handleCommand(command)
-      } else if (domEvent.keyCode === 8) {
-        // Backspace
-        if (cursorPosRef.current > 0) {
-          const line = currentLineRef.current
-          const before = line.slice(0, cursorPosRef.current - 1)
-          const after = line.slice(cursorPosRef.current)
-          currentLineRef.current = before + after
-          cursorPosRef.current--
-          
-          // Move cursor back, rewrite rest of line, clear extra char, move cursor back
-          term.write('\b' + after + ' ' + '\b'.repeat(after.length + 1))
-        }
-      } else if (domEvent.ctrlKey && domEvent.keyCode === 67) {
-        // Ctrl+C - cancel
-        currentLineRef.current = ''
-        cursorPosRef.current = 0
-        term.write('^C')
-        writePrompt()
-      } else if (domEvent.ctrlKey && domEvent.keyCode === 76) {
-        // Ctrl+L - clear
-        term.write('\x1b[2J\x1b[H')
-        writePrompt()
-      } else if (printable) {
-        // Insert character at cursor position
-        const line = currentLineRef.current
-        const before = line.slice(0, cursorPosRef.current)
-        const after = line.slice(cursorPosRef.current)
-        currentLineRef.current = before + key + after
-        cursorPosRef.current++
-        
-        // Write char and rest of line, then move cursor back
-        term.write(key + after)
-        if (after.length > 0) {
-          term.write('\x1b[' + after.length + 'D')
-        }
-      }
-    })
-
-    // Handle paste
+    // Forward all user input to WebSocket
     term.onData((data) => {
-      // Only handle paste (multi-character input)
-      if (data.length > 1 && !isExecutingRef.current) {
-        // Filter out control characters
-        const filtered = data.replace(/[\x00-\x1F\x7F]/g, '')
-        if (filtered) {
-          currentLineRef.current += filtered
-          term.write(filtered)
-        }
-      }
+      sendInput(data)
     })
 
     xtermRef.current = term
@@ -542,35 +367,122 @@ export function OrgoTerminal({
     // Handle resize
     const resizeObserver = new ResizeObserver(() => {
       fitAddon.fit()
+      // Send resize to server after fitting
+      sendResize(term.cols, term.rows)
     })
     resizeObserver.observe(terminalRef.current)
 
-    // Auto-connect
-    setTimeout(() => connect(), 100)
+    // Show initial connecting message
+    term.write('\x1b[1;33m  Orgo Terminal\x1b[0m\r\n')
+    term.write('\x1b[90m  Connecting to your Orgo computer...\x1b[0m\r\n\r\n')
 
-    // Store ref for cleanup
-    const terminalElement = terminalRef.current
+    // Mark xterm as ready after a brief delay to ensure it's fully initialized
+    setTimeout(() => setXtermReady(true), 100)
     
     return () => {
-      terminalElement?.removeEventListener('keydown', handleKeyDown, true)
       resizeObserver.disconnect()
       term.dispose()
       xtermRef.current = null
       fitAddonRef.current = null
+      setXtermReady(false)
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sendInput, sendResize])
+
+  // Connect when both xterm is ready AND computer ID is resolved
+  useEffect(() => {
+    if (resolvedComputerId && xtermReady) {
+      connect()
+    }
+  }, [resolvedComputerId, xtermReady, connect])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      disconnect()
+    }
+  }, [disconnect])
 
   // Handle fullscreen toggle
   useEffect(() => {
     if (fitAddonRef.current) {
-      setTimeout(() => fitAddonRef.current?.fit(), 100)
+      setTimeout(() => {
+        fitAddonRef.current?.fit()
+        if (xtermRef.current) {
+          sendResize(xtermRef.current.cols, xtermRef.current.rows)
+        }
+      }, 100)
     }
-  }, [isFullscreen])
+  }, [isFullscreen, sendResize])
+
+  // Manual reconnect handler
+  const handleReconnect = useCallback(() => {
+    reconnectAttemptRef.current = 0
+    wasConnectedRef.current = false // Reset so initial failure won't trigger auto-reconnect loop
+    disconnect()
+    setTimeout(() => connect(), 500)
+  }, [disconnect, connect])
+
+  // Show migration UI for legacy VMs
+  if (isLegacyVM) {
+    return (
+      <div className={`flex flex-col bg-[#1a1b26] rounded-lg overflow-hidden ${className}`}>
+        {/* Terminal Header */}
+        <div className="flex items-center justify-between px-4 py-2 bg-[#24283b] border-b border-[#32344a]">
+          <div className="flex items-center gap-2">
+            <Terminal className="w-4 h-4 text-[#7aa2f7]" />
+            <span className="text-sm font-mono text-[#a9b1d6]">{title}</span>
+          </div>
+        </div>
+
+        {/* Migration Message */}
+        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+          <div className="w-16 h-16 rounded-full bg-[#e0af68]/20 flex items-center justify-center mb-6">
+            <AlertTriangle className="w-8 h-8 text-[#e0af68]" />
+          </div>
+
+          <h3 className="text-xl font-bold text-[#a9b1d6] mb-3">
+            Terminal Has Been Upgraded
+          </h3>
+
+          <p className="text-[#787c99] text-sm max-w-md mb-6 leading-relaxed">
+            We’ve upgraded our terminal experience using SSH.
+            To use the new interactive terminal, please move to a new VM.
+          </p>
+
+          <div className="flex flex-col gap-3 w-full max-w-xs">
+            {onMigrate && (
+              <button
+                onClick={async () => {
+                  setIsMigrating(true)
+                  try {
+                    await onMigrate()
+                  } catch {
+                    setIsMigrating(false)
+                  }
+                }}
+                disabled={isMigrating}
+                className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-[#7aa2f7] text-[#1a1b26] font-medium hover:bg-[#7da6ff] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isMigrating ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Plus className="w-4 h-4" />
+                )}
+                {isMigrating ? 'Migrating...' : 'Migrate to New VM'}
+              </button>
+            )}
+            <p className="text-[#565f89] text-xs">
+              This will delete your current VM and create a new one with all features enabled.
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div 
-      className={`flex flex-col bg-[#1a1b26] rounded-lg overflow-hidden ${
-        isFullscreen ? 'fixed inset-4 z-50' : ''
+      className={`flex flex-col bg-[#1a1b26] rounded-lg overflow-hidden ${isFullscreen ? 'fixed inset-4 z-50' : ''
       } ${className}`}
     >
       {/* Terminal Header */}
@@ -579,25 +491,29 @@ export function OrgoTerminal({
           <Terminal className="w-4 h-4 text-[#7aa2f7]" />
           <span className="text-sm font-mono text-[#a9b1d6]">{title}</span>
           {connectionState === 'connected' && (
+            <span className="flex items-center gap-1.5">
+              <Wifi className="w-3 h-3 text-green-500" />
             <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+            </span>
           )}
           {connectionState === 'connecting' && (
             <Loader2 className="w-3 h-3 text-yellow-500 animate-spin" />
+          )}
+          {connectionState === 'disconnected' && (
+            <WifiOff className="w-3 h-3 text-gray-500" />
           )}
           {connectionState === 'error' && (
             <span className="w-2 h-2 rounded-full bg-red-500" />
           )}
         </div>
         <div className="flex items-center gap-2">
-          {connectionState === 'error' && (
             <button
-              onClick={connect}
+            onClick={handleReconnect}
               className="p-1.5 rounded hover:bg-[#32344a] text-[#7aa2f7] transition-colors"
               title="Reconnect"
             >
               <RefreshCw className="w-4 h-4" />
             </button>
-          )}
           <button
             onClick={() => setIsFullscreen(!isFullscreen)}
             className="p-1.5 rounded hover:bg-[#32344a] text-[#a9b1d6] transition-colors"
@@ -635,9 +551,9 @@ export function OrgoTerminal({
               <Terminal className="w-6 h-6 text-[#f7768e]" />
             </div>
             <p className="text-[#f7768e] mb-2">Connection Error</p>
-            <p className="text-[#787c99] text-sm mb-4">{error}</p>
+            <p className="text-[#787c99] text-sm mb-4 max-w-md text-center px-4">{error}</p>
             <button
-              onClick={connect}
+              onClick={handleReconnect}
               className="px-4 py-2 rounded-lg bg-[#7aa2f7] text-[#1a1b26] font-medium hover:bg-[#7da6ff] transition-colors"
             >
               Retry

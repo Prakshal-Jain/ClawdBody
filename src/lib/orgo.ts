@@ -296,6 +296,30 @@ export class OrgoClient {
     
     throw new Error('Computer did not become ready in time')
   }
+
+  /**
+   * Get the WebSocket terminal URL for a computer
+   * Use this URL for interactive terminal sessions (full PTY interface)
+   * 
+   * @param computerId - The computer ID
+   * @param cols - Number of columns (default: 80)
+   * @param rows - Number of rows (default: 24)
+   * @returns WebSocket URL for terminal connection
+   * 
+   * @example
+   * const wsUrl = client.getTerminalWebSocketUrl('my-computer-id', 120, 40)
+   * const ws = new WebSocket(wsUrl)
+   * 
+   * @see https://docs.orgo.ai/api-reference/computers/terminal
+   */
+  getTerminalWebSocketUrl(computerId: string, cols: number = 80, rows: number = 24): string {
+    // WebSocket URL uses 'orgo-{uuid}' format as subdomain
+    // Add 'orgo-' prefix if not already present
+    const wsComputerId = computerId.startsWith('orgo-') 
+      ? computerId 
+      : `orgo-${computerId}`
+    return `wss://${wsComputerId}.orgo.dev/terminal?cols=${cols}&rows=${rows}`
+  }
 }
 
 /**
