@@ -9,6 +9,7 @@ import { VMSetup } from '@/lib/vm-setup'
 import { AWSVMSetup } from '@/lib/aws-vm-setup'
 import { E2BVMSetup } from '@/lib/e2b-vm-setup'
 import { encrypt, decrypt } from '@/lib/encryption'
+import { AIProvider, getAIProvider, getApiKeyField } from '@/lib/ai-providers'
 // Import type from Prisma client for type checking
 import type { SetupState } from '@prisma/client'
 
@@ -20,10 +21,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { claudeApiKey, telegramBotToken, telegramUserId, vmId } = await request.json()
+    const { 
+      aiProvider: rawAiProvider, 
+      aiApiKey, 
+      claudeApiKey: legacyClaudeApiKey, // Backward compatibility
+      telegramBotToken, 
+      telegramUserId, 
+      vmId 
+    } = await request.json()
 
-    if (!claudeApiKey) {
-      return NextResponse.json({ error: 'Claude API key is required' }, { status: 400 })
+    // Determine AI provider (default to anthropic for backward compatibility)
+    const aiProvider: AIProvider = rawAiProvider || 'anthropic'
+    const providerConfig = getAIProvider(aiProvider)
+    
+    // Use aiApiKey if provided, otherwise fall back to claudeApiKey for backward compatibility
+    const effectiveApiKey = aiApiKey || legacyClaudeApiKey
+
+    if (!effectiveApiKey) {
+      return NextResponse.json({ error: `${providerConfig.displayName} API key is required` }, { status: 400 })
     }
 
     // Get existing setup state to retrieve user's provider config
@@ -81,11 +96,30 @@ export async function POST(request: NextRequest) {
     // Check if VM is already provisioned (has a cloud resource)
     const isVMAlreadyProvisioned = vm && vm.vmCreated && (vm.orgoComputerId || vm.awsInstanceId || vm.e2bSandboxId)
 
+    // Build the API key update object based on provider
+    const apiKeyUpdate: Record<string, string> = {
+      aiProvider,
+    }
+    
+    // Store the API key in the correct field based on provider
+    switch (aiProvider) {
+      case 'openai':
+        apiKeyUpdate.openaiApiKey = encrypt(effectiveApiKey)
+        break
+      case 'kimi':
+        apiKeyUpdate.kimiApiKey = encrypt(effectiveApiKey)
+        break
+      case 'anthropic':
+      default:
+        apiKeyUpdate.claudeApiKey = encrypt(effectiveApiKey)
+        break
+    }
+
     if (!setupState) {
       setupState = await prisma.setupState.create({
         data: {
           userId: session.user.id,
-          claudeApiKey: encrypt(claudeApiKey),
+          ...apiKeyUpdate,
           status: isVMAlreadyProvisioned ? 'configuring_vm' : 'provisioning',
           // Sync vmCreated from the VM if it's already provisioned
           vmCreated: isVMAlreadyProvisioned ? true : false,
@@ -99,7 +133,7 @@ export async function POST(request: NextRequest) {
       setupState = await prisma.setupState.update({
         where: { id: setupState.id },
         data: {
-          claudeApiKey: encrypt(claudeApiKey),
+          ...apiKeyUpdate,
           status: isVMAlreadyProvisioned ? 'configuring_vm' : 'provisioning',
           errorMessage: null,
           // Only reset vmCreated if the VM hasn't been provisioned yet
@@ -132,7 +166,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Start async setup process based on provider
-    // Note: claudeApiKey is passed as-is (plaintext from request), but provider keys are decrypted from DB
+    // Note: effectiveApiKey is passed as-is (plaintext from request), but provider keys are decrypted from DB
     if (vmProvider === 'aws') {
       // Type assertion to access AWS fields
       const awsState = setupState as SetupState & {
@@ -146,14 +180,15 @@ export async function POST(request: NextRequest) {
       const decryptedSecretAccessKey = decrypt(awsState.awsSecretAccessKey!)
       runAWSSetupProcess(
         session.user.id,
-        claudeApiKey,
+        effectiveApiKey,
         decryptedAccessKeyId,
         decryptedSecretAccessKey,
         awsState.awsRegion || 'us-east-1',
         vm?.awsInstanceType || awsState.awsInstanceType || 't3.micro',
         telegramBotToken,
         telegramUserId,
-        vmId // Pass vmId
+        vmId, // Pass vmId
+        aiProvider // Pass AI provider
       ).catch(() => { })
     } else if (vmProvider === 'e2b') {
       // Type assertion to access E2B fields
@@ -162,13 +197,14 @@ export async function POST(request: NextRequest) {
       const decryptedE2bApiKey = decrypt(e2bState.e2bApiKey!)
       runE2BSetupProcess(
         session.user.id,
-        claudeApiKey,
+        effectiveApiKey,
         decryptedE2bApiKey,
         vm?.e2bTemplateId || 'base',
         vm?.e2bTimeout || 3600,
         telegramBotToken,
         telegramUserId,
-        vmId // Pass vmId
+        vmId, // Pass vmId
+        aiProvider // Pass AI provider
       ).catch(() => { })
     } else {
       // Type assertion to access Orgo-specific fields (TypeScript may have stale types cached)
@@ -177,14 +213,15 @@ export async function POST(request: NextRequest) {
       const decryptedOrgoApiKey = decrypt(setupState.orgoApiKey!)
       runSetupProcess(
         session.user.id,
-        claudeApiKey,
+        effectiveApiKey,
         decryptedOrgoApiKey,
         vm?.orgoProjectName || setupState.orgoProjectName || 'claude-brain',
         telegramBotToken,
         telegramUserId,
         vmId, // Pass vmId
         orgoVM?.orgoRam || 4, // Pass RAM (default 4 GB)
-        orgoVM?.orgoCpu || 2  // Pass CPU (default 2 cores)
+        orgoVM?.orgoCpu || 2,  // Pass CPU (default 2 cores)
+        aiProvider // Pass AI provider
       ).catch(() => { })
     }
 
@@ -205,14 +242,15 @@ export async function POST(request: NextRequest) {
 
 async function runSetupProcess(
   userId: string,
-  claudeApiKey: string,
+  aiApiKey: string,
   orgoApiKey: string,
   projectName: string,
   telegramBotToken?: string,
   telegramUserId?: string,
   vmId?: string,
   orgoRam: number = 4,
-  orgoCpu: number = 2
+  orgoCpu: number = 2,
+  aiProvider: AIProvider = 'anthropic'
 ) {
   const updateStatus = async (updates: Partial<{
     status: string
@@ -440,7 +478,8 @@ async function runSetupProcess(
 
     if (finalTelegramToken) {
       const telegramSuccess = await vmSetup.setupClawdbotTelegram({
-        claudeApiKey,
+        aiApiKey,
+        aiProvider,
         telegramBotToken: finalTelegramToken,
         telegramUserId: finalTelegramUserId,
         clawdbotVersion: clawdbotResult.version,
@@ -451,12 +490,12 @@ async function runSetupProcess(
       await updateStatus({ telegramConfigured: telegramSuccess })
 
       if (telegramSuccess) {
-        const gatewaySuccess = await vmSetup.startClawdbotGateway(claudeApiKey, finalTelegramToken)
+        const gatewaySuccess = await vmSetup.startClawdbotGateway(aiApiKey, finalTelegramToken, aiProvider)
         await updateStatus({ gatewayStarted: gatewaySuccess })
       }
     } else {
-      // Just store Claude API key if no Telegram
-      await vmSetup.storeClaudeKey(claudeApiKey)
+      // Just store AI API key if no Telegram
+      await vmSetup.storeAIApiKey(aiApiKey, aiProvider)
     }
 
     // Setup complete!
@@ -476,14 +515,15 @@ async function runSetupProcess(
  */
 async function runAWSSetupProcess(
   userId: string,
-  claudeApiKey: string,
+  aiApiKey: string,
   awsAccessKeyId: string,
   awsSecretAccessKey: string,
   awsRegion: string,
   awsInstanceType: string,
   telegramBotToken?: string,
   telegramUserId?: string,
-  vmId?: string
+  vmId?: string,
+  aiProvider: AIProvider = 'anthropic'
 ) {
   const updateStatus = async (updates: Partial<{
     status: string
@@ -615,7 +655,8 @@ async function runAWSSetupProcess(
 
     if (finalTelegramToken) {
       const telegramSuccess = await awsVMSetup.setupClawdbotTelegram({
-        claudeApiKey,
+        aiApiKey,
+        aiProvider,
         telegramBotToken: finalTelegramToken,
         telegramUserId: finalTelegramUserId,
         clawdbotVersion: clawdbotResult.version,
@@ -626,11 +667,12 @@ async function runAWSSetupProcess(
       await updateStatus({ telegramConfigured: telegramSuccess })
 
       if (telegramSuccess) {
-        const gatewaySuccess = await awsVMSetup.startClawdbotGateway(claudeApiKey, finalTelegramToken)
+        const gatewaySuccess = await awsVMSetup.startClawdbotGateway(aiApiKey, finalTelegramToken, aiProvider)
         await updateStatus({ gatewayStarted: gatewaySuccess })
       }
     } else {
-      await awsVMSetup.storeClaudeKey(claudeApiKey)
+      // Just store AI API key if no Telegram
+      await awsVMSetup.storeAIApiKey(aiApiKey, aiProvider)
     }
 
     // Setup complete!
@@ -669,13 +711,14 @@ async function runAWSSetupProcess(
  */
 async function runE2BSetupProcess(
   userId: string,
-  claudeApiKey: string,
+  aiApiKey: string,
   e2bApiKey: string,
   templateId: string,
   timeout: number,
   telegramBotToken?: string,
   telegramUserId?: string,
-  vmId?: string
+  vmId?: string,
+  aiProvider: AIProvider = 'anthropic'
 ) {
   const updateStatus = async (updates: Partial<{
     status: string
@@ -783,7 +826,8 @@ async function runE2BSetupProcess(
 
     if (finalTelegramToken) {
       const telegramSuccess = await e2bVMSetup.setupClawdbotTelegram({
-        claudeApiKey,
+        aiApiKey,
+        aiProvider,
         telegramBotToken: finalTelegramToken,
         telegramUserId: finalTelegramUserId,
         clawdbotVersion: clawdbotResult.version,
@@ -794,11 +838,12 @@ async function runE2BSetupProcess(
       await updateStatus({ telegramConfigured: telegramSuccess })
 
       if (telegramSuccess) {
-        const gatewaySuccess = await e2bVMSetup.startClawdbotGateway(claudeApiKey, finalTelegramToken)
+        const gatewaySuccess = await e2bVMSetup.startClawdbotGateway(aiApiKey, finalTelegramToken, aiProvider)
         await updateStatus({ gatewayStarted: gatewaySuccess })
       }
     } else {
-      await e2bVMSetup.storeClaudeKey(claudeApiKey)
+      // Just store AI API key if no Telegram
+      await e2bVMSetup.storeAIApiKey(aiApiKey, aiProvider)
     }
 
     // Setup complete!

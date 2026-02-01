@@ -3,12 +3,12 @@
 import { useState, useEffect } from 'react'
 import { useSession, signOut } from 'next-auth/react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  CheckCircle2, 
-  Circle, 
-  Loader2, 
-  Server, 
-  GitBranch, 
+import {
+  CheckCircle2,
+  Circle,
+  Loader2,
+  Server,
+  GitBranch,
   Terminal,
   LogOut,
   ExternalLink,
@@ -18,10 +18,12 @@ import {
   ChevronUp,
   Trash2,
   MessageCircle,
-  XCircle
+  XCircle,
+  AlertTriangle,
+  RotateCcw
 } from 'lucide-react'
 
-type SetupStep = 
+type SetupStep =
   | 'provisioning'
   | 'creating_repo'
   | 'configuring_vm'
@@ -55,12 +57,18 @@ export function SetupWizard() {
   const [currentScreenshot, setCurrentScreenshot] = useState<string | null>(null)
   const [isProgressCollapsed, setIsProgressCollapsed] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
-  
+  const [isReprovisioning, setIsReprovisioning] = useState(false)
+
+  // Check if the error indicates VM provisioning failure (Orgo VM failed to start)
+  const isVMProvisioningFailure = error?.includes('Failed to install Python and essential tools on VM') ||
+    error?.includes('VM not ready after waiting') ||
+    error?.includes('Proxy error')
+
   // Check if we have a valid VM identifier for screenshots
   const hasVmIdentifier = setupStatus?.vmCreated && (
     setupStatus?.orgoComputerId || setupStatus?.awsInstanceId
   )
-  
+
   // Poll for screenshots if VM is created (Orgo only - AWS doesn't support screenshots)
   useEffect(() => {
     // Only poll screenshots for Orgo VMs (AWS EC2 doesn't have built-in screenshot API)
@@ -90,7 +98,7 @@ export function SetupWizard() {
             // VM is still starting, this is normal - don't log as error
             return
           }
-          
+
           const errorData = await res.json().catch(() => ({ error: 'Unknown error' }))
           // Only log non-503 errors
           if (res.status !== 503) {
@@ -119,7 +127,7 @@ export function SetupWizard() {
         if (res.ok) {
           const status: SetupStatus = await res.json()
           setSetupStatus(status)
-          
+
           // Update step based on status - check status field first, then boolean flags
           if (status.status === 'requires_payment') {
             // Don't set error for billing notice - it's handled separately in the UI
@@ -156,7 +164,7 @@ export function SetupWizard() {
           if (res.ok) {
             const status: SetupStatus = await res.json()
             setSetupStatus(status)
-            
+
             // Update step based on status - check status field first, then boolean flags
             if (status.status === 'requires_payment') {
               // Don't set error for billing notice - it's handled separately in the UI
@@ -175,7 +183,7 @@ export function SetupWizard() {
         } catch (e) {
         }
       }, 2000)
-      
+
       return () => clearInterval(interval)
     }
   }, [currentStep])
@@ -190,7 +198,7 @@ export function SetupWizard() {
     const stepOrder = ['provisioning', 'configuring_vm', 'complete']
     const currentIndex = stepOrder.indexOf(currentStep)
     const stepIndex = stepOrder.indexOf(stepId)
-    
+
     if (stepIndex < currentIndex) return 'complete'
     if (stepIndex === currentIndex) return 'current'
     return 'pending'
@@ -200,7 +208,7 @@ export function SetupWizard() {
     <div className="min-h-screen bg-sam-bg relative">
       {/* Ambient glow - warm orange inspired by "Her" */}
       <div className="absolute top-0 right-1/4 w-[500px] h-[500px] bg-sam-accent/8 rounded-full blur-[150px] pointer-events-none" />
-      
+
       <div className="relative z-10 max-w-4xl mx-auto px-6 py-12">
         {/* Header */}
         <div className="flex items-center justify-between mb-12">
@@ -212,7 +220,7 @@ export function SetupWizard() {
               Welcome, {session?.user?.name || 'Agent'}
             </p>
           </div>
-          
+
           <button
             onClick={() => signOut({ callbackUrl: '/' })}
             className="flex items-center gap-2 px-4 py-2 rounded-lg border border-sam-border hover:border-sam-error/50 text-sam-text-dim hover:text-sam-error transition-all"
@@ -226,19 +234,19 @@ export function SetupWizard() {
         <div className="flex items-center justify-between mb-12 relative">
           {/* Progress line */}
           <div className="absolute top-5 left-0 right-0 h-0.5 bg-sam-border" />
-          <motion.div 
+          <motion.div
             className="absolute top-5 left-0 h-0.5 bg-sam-accent"
             initial={{ width: '0%' }}
-            animate={{ 
-              width: `${(steps.findIndex(s => s.id === currentStep) / (steps.length - 1)) * 100}%` 
+            animate={{
+              width: `${(steps.findIndex(s => s.id === currentStep) / (steps.length - 1)) * 100}%`
             }}
             transition={{ duration: 0.5 }}
           />
-          
+
           {steps.map((step, index) => {
             const status = getStepStatus(step.id)
             const Icon = step.icon
-            
+
             return (
               <div key={step.id} className="relative flex flex-col items-center">
                 <motion.div
@@ -330,9 +338,83 @@ export function SetupWizard() {
                   </div>
                 </motion.div>
               )}
-              
-              {/* Regular error display */}
-              {error && setupStatus?.status !== 'requires_payment' && (
+
+              {/* VM Provisioning Failure - Special prominent error */}
+              {error && isVMProvisioningFailure && setupStatus?.vmProvider === 'orgo' && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="p-5 rounded-xl bg-sam-error/10 border-2 border-sam-error/50"
+                >
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 rounded-full bg-sam-error/20 flex items-center justify-center flex-shrink-0">
+                      <AlertTriangle className="w-6 h-6 text-sam-error" />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-sam-error font-bold text-lg mb-2">VM Provisioning Failed</h3>
+                      <p className="text-sam-text-dim text-sm mb-3">
+                        The Orgo VM appears to have failed to provision correctly. This can happen occasionally when the cloud provider experiences issues starting the virtual machine.
+                      </p>
+                      <div className="p-3 rounded-lg bg-sam-bg/50 border border-sam-border mb-4">
+                        <p className="text-xs text-sam-text-dim font-mono">
+                          <strong className="text-sam-error">Error:</strong> {error}
+                        </p>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          setIsReprovisioning(true)
+                          try {
+                            // Call reprovision API - this will delete old VM, create new one, and set it up
+                            const res = await fetch('/api/setup/reprovision', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({}),
+                            })
+
+                            if (!res.ok) {
+                              const errorData = await res.json().catch(() => ({ error: 'Unknown error' }))
+                              throw new Error(errorData.error || 'Failed to start reprovision')
+                            }
+
+                            // Reset local state - the polling will pick up the new status
+                            setError(null)
+                            setCurrentStep('provisioning')
+                            setSetupStatus(prev => prev ? {
+                              ...prev,
+                              vmCreated: false,
+                              status: 'provisioning',
+                              errorMessage: undefined,
+                              orgoComputerId: undefined,
+                              orgoComputerUrl: undefined,
+                            } : null)
+                          } catch (err) {
+                            setError(`Failed to reprovision: ${err instanceof Error ? err.message : 'Unknown error'}`)
+                          } finally {
+                            setIsReprovisioning(false)
+                          }
+                        }}
+                        disabled={isReprovisioning}
+                        className="flex items-center gap-2 px-5 py-3 rounded-lg bg-sam-accent text-sam-bg font-bold hover:bg-sam-accent/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isReprovisioning ? (
+                          <>
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                            Reprovisioning...
+                          </>
+                        ) : (
+                          <>
+                            <RotateCcw className="w-5 h-5" />
+                            Reprovision VM
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Regular error display (for non-provisioning errors) */}
+              {error && !isVMProvisioningFailure && setupStatus?.status !== 'requires_payment' && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
@@ -342,7 +424,7 @@ export function SetupWizard() {
                   <p className="text-sam-error text-sm">{error}</p>
                 </motion.div>
               )}
-              
+
               {/* Two-column layout: VM stream on left, progress on right */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* VM Stream on Left */}
@@ -353,7 +435,7 @@ export function SetupWizard() {
                         {setupStatus?.vmProvider === 'aws' ? 'EC2 Instance' : 'VM Screen'}
                       </h3>
                       <p className="text-xs text-sam-text-dim font-mono">
-                        {setupStatus?.vmProvider === 'aws' 
+                        {setupStatus?.vmProvider === 'aws'
                           ? (setupStatus?.awsPublicIp || 'Provisioning...')
                           : 'Live view'}
                       </p>
@@ -409,7 +491,7 @@ export function SetupWizard() {
                       </div>
                     ) : setupStatus?.vmCreated && setupStatus?.orgoComputerId ? (
                       currentScreenshot ? (
-                        <img 
+                        <img
                           src={currentScreenshot.startsWith('http') ? currentScreenshot : `data:image/png;base64,${currentScreenshot}`}
                           alt="VM Screen"
                           className="w-full h-full object-contain"
@@ -434,7 +516,7 @@ export function SetupWizard() {
 
                 {/* Progress Card on Right (Collapsible) */}
                 <div className="rounded-2xl border border-sam-border bg-sam-surface/50 backdrop-blur overflow-hidden">
-                  <div 
+                  <div
                     className="px-6 py-4 border-b border-sam-border bg-sam-surface/50 flex items-center justify-between cursor-pointer hover:bg-sam-surface/70 transition-colors"
                     onClick={() => setIsProgressCollapsed(!isProgressCollapsed)}
                   >
@@ -521,7 +603,7 @@ export function SetupWizard() {
                 >
                   <CheckCircle2 className="w-10 h-10 text-sam-accent" />
                 </motion.div>
-                
+
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex-1">
                     <h2 className="text-3xl font-display font-bold mb-2">
@@ -700,14 +782,14 @@ export function SetupWizard() {
   )
 }
 
-function SetupTaskItem({ 
-  label, 
-  sublabel, 
-  status 
-}: { 
+function SetupTaskItem({
+  label,
+  sublabel,
+  status
+}: {
   label: string
   sublabel: string
-  status: 'pending' | 'running' | 'complete' 
+  status: 'pending' | 'running' | 'complete'
 }) {
   return (
     <div className="flex items-center gap-4 p-4 rounded-lg bg-sam-bg/50">
@@ -729,7 +811,7 @@ function SetupTaskItem({
 function getTerminalText(step: SetupStep, status: SetupStatus | null): string {
   const isAWS = status?.vmProvider === 'aws'
   const isE2B = status?.vmProvider === 'e2b'
-  
+
   if (step === 'provisioning') {
     if (isAWS) {
       return `aws ec2 run-instances --region ${status?.awsRegion || 'us-east-1'} --instance-type t3.micro`
@@ -744,11 +826,11 @@ function getTerminalText(step: SetupStep, status: SetupStatus | null): string {
     if (status?.telegramConfigured) return 'nohup /tmp/start-clawdbot.sh &'
     if (status?.clawdbotInstalled) return 'npm install -g clawdbot@latest'
     if (status?.vmCreated) return 'sudo apt-get install -y python3 pip'
-    return isAWS 
+    return isAWS
       ? 'Connecting to EC2 instance via SSH...'
       : isE2B
-      ? 'Initializing E2B sandbox...'
-      : 'Waiting for VM to be ready...'
+        ? 'Initializing E2B sandbox...'
+        : 'Waiting for VM to be ready...'
   }
   return 'echo "Setup complete!"'
 }

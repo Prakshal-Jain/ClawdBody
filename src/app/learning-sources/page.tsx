@@ -5,12 +5,13 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useSession, signOut } from 'next-auth/react'
 import { motion } from 'framer-motion'
-import { Mail, Calendar, MessageSquare, FileText, MessageCircle, Bot, Video, Phone, Loader2, RefreshCw, Check, Key, AlertCircle, ArrowRight, ExternalLink, LogOut, Github, X, Server, GitBranch, Terminal, CheckCircle2, ChevronDown, ChevronUp, Trash2, XCircle, Monitor } from 'lucide-react'
+import { Mail, Calendar, MessageSquare, FileText, MessageCircle, Bot, Video, Phone, Loader2, RefreshCw, Check, Key, AlertCircle, ArrowRight, ExternalLink, LogOut, Github, X, Server, GitBranch, Terminal, CheckCircle2, ChevronDown, ChevronUp, Trash2, XCircle, Monitor, AlertTriangle, RotateCcw } from 'lucide-react'
 import { WebTerminal } from '@/components/WebTerminal'
 import { OrgoTerminal } from '@/components/OrgoTerminal'
 import { E2BTerminal } from '@/components/E2BTerminal'
 import { ClawdbotChat } from '@/components/ClawdbotChat'
 import { OrgoVNCDisplay } from '@/components/OrgoVNCDisplay'
+import { AI_PROVIDERS, AIProvider, getAIProvider, getAllProviders } from '@/lib/ai-providers'
 
 interface Connector {
   id: string
@@ -231,7 +232,8 @@ function LearningSourcesContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [refreshKey, setRefreshKey] = useState(0)
-  const [claudeApiKey, setClaudeApiKey] = useState('')
+  const [selectedAIProvider, setSelectedAIProvider] = useState<AIProvider>('anthropic')
+  const [aiApiKey, setAiApiKey] = useState('')
   const [telegramBotToken, setTelegramBotToken] = useState('')
   const [telegramUserId, setTelegramUserId] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -515,8 +517,9 @@ function LearningSourcesContent() {
   }, [showSetupProgress, addLog])
 
   const handleStartSetup = async () => {
-    if (!claudeApiKey.trim()) {
-      setSetupError('Claude API key is required')
+    const providerConfig = getAIProvider(selectedAIProvider)
+    if (!aiApiKey.trim()) {
+      setSetupError(`${providerConfig.displayName} API key is required`)
       return
     }
 
@@ -529,7 +532,10 @@ function LearningSourcesContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          claudeApiKey,
+          aiProvider: selectedAIProvider,
+          aiApiKey: aiApiKey.trim(),
+          // Also send as claudeApiKey for backward compatibility
+          claudeApiKey: selectedAIProvider === 'anthropic' ? aiApiKey.trim() : undefined,
           telegramBotToken: telegramBotToken.trim() || undefined,
           telegramUserId: telegramUserId.trim() || undefined,
           vmId, // Pass vmId so the backend updates the correct VM
@@ -547,7 +553,7 @@ function LearningSourcesContent() {
       addLog('info', 'Creating Orgo VM...')
 
       // Clear the input
-      setClaudeApiKey('')
+      setAiApiKey('')
     } catch (e) {
       setSetupError(e instanceof Error ? e.message : 'Something went wrong')
       addLog('error', e instanceof Error ? e.message : 'Failed to start setup')
@@ -737,7 +743,7 @@ function LearningSourcesContent() {
                     <div>
                       <p className="text-green-400 font-medium">VM is ready!</p>
                       <p className="text-green-400/80 text-sm mt-1">
-                        Your VM has been provisioned. Enter your Claude API key below to complete the setup.
+                        Your VM has been provisioned. Select your AI provider and enter your API key below to complete the setup.
                       </p>
                     </div>
                   </motion.div>
@@ -757,26 +763,57 @@ function LearningSourcesContent() {
                 )}
 
                 <div className="space-y-6">
+                  {/* AI Provider Selection */}
                   <div>
                     <label className="block text-sm font-mono text-sam-text-dim mb-2">
-                      Claude API Key <span className="text-sam-error">*</span>
+                      AI Provider <span className="text-sam-error">*</span>
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {getAllProviders().map((provider) => (
+                        <button
+                          key={provider.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedAIProvider(provider.id)
+                            setAiApiKey('') // Clear API key when switching providers
+                          }}
+                          className={`p-4 rounded-lg border text-left transition-all ${selectedAIProvider === provider.id
+                              ? 'border-sam-accent bg-sam-accent/10'
+                              : 'border-sam-border bg-sam-bg hover:border-sam-accent/50'
+                            }`}
+                        >
+                          <div className="font-display font-semibold text-sam-text mb-1">
+                            {provider.displayName}
+                          </div>
+                          <div className="text-xs text-sam-text-dim">
+                            {provider.models[0]?.name}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* API Key Input */}
+                  <div>
+                    <label className="block text-sm font-mono text-sam-text-dim mb-2">
+                      {getAIProvider(selectedAIProvider).displayName} API Key <span className="text-sam-error">*</span>
                     </label>
                     <div className="relative">
                       <input
                         type="password"
-                        value={claudeApiKey}
-                        onChange={(e) => setClaudeApiKey(e.target.value)}
-                        placeholder="sk-ant-api03-..."
+                        value={aiApiKey}
+                        onChange={(e) => setAiApiKey(e.target.value)}
+                        placeholder={getAIProvider(selectedAIProvider).apiKeyPlaceholder}
                         className="w-full px-4 py-3 rounded-lg bg-sam-bg border border-sam-border focus:border-sam-accent outline-none font-mono text-sm transition-colors"
                       />
                     </div>
                     <a
-                      href="https://console.anthropic.com/settings/keys"
+                      href={getAIProvider(selectedAIProvider).getApiKeyUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1 mt-2 text-xs text-sam-accent hover:underline"
                     >
-                      Get your key from Anthropic Console
+                      Get your key from {getAIProvider(selectedAIProvider).displayName}
                       <ExternalLink className="w-3 h-3" />
                     </a>
                   </div>
@@ -822,7 +859,7 @@ function LearningSourcesContent() {
 
                 <button
                   onClick={handleStartSetup}
-                  disabled={isSubmitting || !claudeApiKey.trim()}
+                  disabled={isSubmitting || !aiApiKey.trim()}
                   className="mt-8 w-full flex items-center justify-center gap-2 px-6 py-4 rounded-xl bg-sam-accent text-sam-bg font-display font-semibold hover:bg-sam-accent-dim disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                 >
                   {isSubmitting ? (
@@ -1418,7 +1455,7 @@ function SetupProgressView({
   // Calculate progress based on completed steps + partial progress for active step
   const completedSteps = steps.filter(s => s.check()).length
   const activeStepIndex = steps.findIndex(s => s.active() && !s.check())
-  
+
   // Calculate progress: completed steps + half credit for active step
   const progressPercentage = setupStatus?.status === 'ready'
     ? 100
@@ -1571,20 +1608,81 @@ function SetupProgressView({
               })}
             </div>
 
-            {/* Error Message */}
+            {/* VM Provisioning Failure - Special prominent error */}
             {setupStatus?.errorMessage && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                className="mb-6 p-4 rounded-lg bg-sam-error/10 border border-sam-error/30 flex items-start gap-3"
-              >
-                <AlertCircle className="w-5 h-5 text-sam-error flex-shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <p className="text-sam-error text-sm font-semibold mb-1">Setup Error</p>
-                  <p className="text-sam-error text-sm">{setupStatus.errorMessage}</p>
-                </div>
-              </motion.div>
-            )}
+              setupStatus.errorMessage.includes('Failed to install Python and essential tools on VM') ||
+              setupStatus.errorMessage.includes('VM not ready after waiting') ||
+              setupStatus.errorMessage.includes('Proxy error')
+            ) && setupStatus?.vmProvider === 'orgo' && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="mb-6 p-5 rounded-xl bg-sam-error/10 border-2 border-sam-error/50"
+                >
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 rounded-full bg-sam-error/20 flex items-center justify-center flex-shrink-0">
+                      <AlertTriangle className="w-6 h-6 text-sam-error" />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-sam-error font-bold text-lg mb-2">VM Provisioning Failed</h3>
+                      <p className="text-sam-text-dim text-sm mb-3">
+                        The Orgo VM appears to have failed to provision correctly. This can happen occasionally when the cloud provider experiences issues starting the virtual machine.
+                      </p>
+                      <div className="p-3 rounded-lg bg-sam-bg/50 border border-sam-border mb-4">
+                        <p className="text-xs text-sam-text-dim font-mono">
+                          <strong className="text-sam-error">Error:</strong> {setupStatus.errorMessage}
+                        </p>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          try {
+                            // Call reprovision API - this will delete old VM, create new one, and set it up
+                            const res = await fetch('/api/setup/reprovision', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ vmId }),
+                            })
+
+                            if (!res.ok) {
+                              const errorData = await res.json().catch(() => ({ error: 'Unknown error' }))
+                              throw new Error(errorData.error || 'Failed to start reprovision')
+                            }
+
+                            // Refresh the page to show provisioning progress
+                            window.location.reload()
+                          } catch (err) {
+                            alert(`Failed to reprovision: ${err instanceof Error ? err.message : 'Unknown error'}. Please try again.`)
+                          }
+                        }}
+                        className="flex items-center gap-2 px-5 py-3 rounded-lg bg-sam-accent text-sam-bg font-bold hover:bg-sam-accent/90 transition-all"
+                      >
+                        <RotateCcw className="w-5 h-5" />
+                        Reprovision VM
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+            {/* Regular Error Message (for non-provisioning errors) */}
+            {setupStatus?.errorMessage && !(
+              (setupStatus.errorMessage.includes('Failed to install Python and essential tools on VM') ||
+                setupStatus.errorMessage.includes('VM not ready after waiting') ||
+                setupStatus.errorMessage.includes('Proxy error')) &&
+              setupStatus?.vmProvider === 'orgo'
+            ) && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="mb-6 p-4 rounded-lg bg-sam-error/10 border border-sam-error/30 flex items-start gap-3"
+                >
+                  <AlertCircle className="w-5 h-5 text-sam-error flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-sam-error text-sm font-semibold mb-1">Setup Error</p>
+                    <p className="text-sam-error text-sm">{setupStatus.errorMessage}</p>
+                  </div>
+                </motion.div>
+              )}
 
             {/* Setup Logs */}
             <div className="border border-sam-border rounded-lg bg-sam-bg overflow-hidden">
@@ -1759,68 +1857,68 @@ function ComputerConnectedView({
               className="w-full h-full absolute inset-0"
             />
           ) : /* AWS: Interactive Web Terminal */
-          setupStatus?.vmProvider === 'aws' && setupStatus?.awsPublicIp ? (
-            activeVMTab === 'terminal' ? (
-              <WebTerminal
-                vmId={vmId || undefined}
-                title={`ubuntu@${setupStatus.awsPublicIp}`}
-                autoConnect={true}
-                className="w-full h-full"
-              />
+            setupStatus?.vmProvider === 'aws' && setupStatus?.awsPublicIp ? (
+              activeVMTab === 'terminal' ? (
+                <WebTerminal
+                  vmId={vmId || undefined}
+                  title={`ubuntu@${setupStatus.awsPublicIp}`}
+                  autoConnect={true}
+                  className="w-full h-full"
+                />
+              ) : (
+                <WebTerminal
+                  vmId={vmId || undefined}
+                  title={`ubuntu@${setupStatus.awsPublicIp}`}
+                  autoConnect={true}
+                  className="w-full h-full"
+                />
+              )
+            ) : setupStatus?.vmProvider === 'e2b' && setupStatus?.e2bSandboxId ? (
+              // E2B: Terminal view
+              activeVMTab === 'terminal' ? (
+                <E2BTerminal
+                  vmId={vmId || undefined}
+                  sandboxId={setupStatus?.e2bSandboxId || undefined}
+                  title="E2B Sandbox Terminal"
+                  className="w-full h-full"
+                />
+              ) : (
+                <E2BTerminal
+                  vmId={vmId || undefined}
+                  sandboxId={setupStatus?.e2bSandboxId || undefined}
+                  title="E2B Sandbox Terminal"
+                  className="w-full h-full"
+                />
+              )
+            ) : setupStatus?.vmCreated && setupStatus?.orgoComputerId ? (
+              // Orgo VM: Show content based on active tab
+              activeVMTab === 'screen' ? (
+                // VNC display for Orgo VMs - allows direct interaction
+                <OrgoVNCDisplay
+                  vmId={vmId || undefined}
+                  className="w-full h-full"
+                />
+              ) : activeVMTab === 'terminal' ? (
+                // Terminal tab - Orgo bash terminal
+                <OrgoTerminal
+                  vmId={vmId || undefined}
+                  computerId={setupStatus?.orgoComputerId || undefined}
+                  title="Orgo Terminal"
+                  className="w-full h-full"
+                />
+              ) : (
+                // Fallback to VNC for Orgo
+                <OrgoVNCDisplay
+                  vmId={vmId || undefined}
+                  className="w-full h-full"
+                />
+              )
             ) : (
-              <WebTerminal
-                vmId={vmId || undefined}
-                title={`ubuntu@${setupStatus.awsPublicIp}`}
-                autoConnect={true}
-                className="w-full h-full"
-              />
-            )
-          ) : setupStatus?.vmProvider === 'e2b' && setupStatus?.e2bSandboxId ? (
-            // E2B: Terminal view
-            activeVMTab === 'terminal' ? (
-              <E2BTerminal
-                vmId={vmId || undefined}
-                sandboxId={setupStatus?.e2bSandboxId || undefined}
-                title="E2B Sandbox Terminal"
-                className="w-full h-full"
-              />
-            ) : (
-              <E2BTerminal
-                vmId={vmId || undefined}
-                sandboxId={setupStatus?.e2bSandboxId || undefined}
-                title="E2B Sandbox Terminal"
-                className="w-full h-full"
-              />
-            )
-          ) : setupStatus?.vmCreated && setupStatus?.orgoComputerId ? (
-            // Orgo VM: Show content based on active tab
-            activeVMTab === 'screen' ? (
-              // VNC display for Orgo VMs - allows direct interaction
-              <OrgoVNCDisplay
-                vmId={vmId || undefined}
-                className="w-full h-full"
-              />
-            ) : activeVMTab === 'terminal' ? (
-              // Terminal tab - Orgo bash terminal
-              <OrgoTerminal
-                vmId={vmId || undefined}
-                computerId={setupStatus?.orgoComputerId || undefined}
-                title="Orgo Terminal"
-                className="w-full h-full"
-              />
-            ) : (
-              // Fallback to VNC for Orgo
-              <OrgoVNCDisplay
-                vmId={vmId || undefined}
-                className="w-full h-full"
-              />
-            )
-          ) : (
-            <div className="flex flex-col items-center gap-3 text-sam-text-dim">
-              <Server className="w-8 h-8" />
-              <p className="text-sm font-mono">VM not yet created</p>
-            </div>
-          )}
+              <div className="flex flex-col items-center gap-3 text-sam-text-dim">
+                <Server className="w-8 h-8" />
+                <p className="text-sm font-mono">VM not yet created</p>
+              </div>
+            )}
         </div>
       </div>
 

@@ -4,6 +4,7 @@
  */
 
 import { OrgoClient } from './orgo'
+import { AIProvider, getAIProvider, generateAuthProfiles, generateEnvExport, getDefaultModelConfig } from './ai-providers'
 
 export interface SetupProgress {
   step: string
@@ -848,7 +849,8 @@ echo "INSTALL_COMPLETE" >> /tmp/clawdbot-install.log
    * Heartbeat config goes under agents.defaults.heartbeat (not root level)
    */
   async setupClawdbotTelegram(options: {
-    claudeApiKey: string
+    aiApiKey: string
+    aiProvider?: AIProvider
     telegramBotToken: string
     telegramUserId?: string
     clawdbotVersion?: string
@@ -857,7 +859,8 @@ echo "INSTALL_COMPLETE" >> /tmp/clawdbot-install.log
     apiBaseUrl?: string
   }): Promise<boolean> {
     const {
-      claudeApiKey,
+      aiApiKey,
+      aiProvider = 'anthropic',
       telegramBotToken,
       telegramUserId,
       clawdbotVersion = '2026.1.22',
@@ -865,6 +868,8 @@ echo "INSTALL_COMPLETE" >> /tmp/clawdbot-install.log
       userId,
       apiBaseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000'
     } = options
+    
+    const providerConfig = getAIProvider(aiProvider)
 
     // Create directories
     await this.runCommand('mkdir -p ~/.clawdbot /home/user/clawd/knowledge', 'Create Clawdbot directories')
@@ -974,21 +979,21 @@ During heartbeat, check the following:
       'Create HEARTBEAT.md checklist'
     )
 
+    // Generate auth profiles based on selected AI provider
+    const authProfiles = generateAuthProfiles(aiProvider)
+    const defaultModel = getDefaultModelConfig(aiProvider)
+
     // Create config JSON with heartbeat under agents.defaults (correct location)
     const configJson = `{
   "meta": {
     "lastTouchedVersion": "${clawdbotVersion}"
   },
   "auth": {
-    "profiles": {
-      "anthropic:default": {
-        "provider": "anthropic",
-        "mode": "api_key"
-      }
-    }
+    "profiles": ${JSON.stringify(authProfiles, null, 6).replace(/^/gm, '    ').trim()}
   },
   "agents": {
     "defaults": {
+      "model": "${defaultModel}",
       "workspace": "/home/user/clawd",
       "compaction": {
         "mode": "safeguard"
@@ -1048,6 +1053,14 @@ During heartbeat, check the following:
       return false
     }
 
+    // Create auth-profiles.json in the agent directory (ClawdBot looks here for API keys)
+    const authProfilesJson = JSON.stringify(authProfiles, null, 2)
+    const authProfilesB64 = Buffer.from(authProfilesJson).toString('base64')
+    await this.runCommand(
+      `mkdir -p ~/.clawdbot/agents/main/agent && echo '${authProfilesB64}' | base64 -d > ~/.clawdbot/agents/main/agent/auth-profiles.json`,
+      'Write auth-profiles.json to agent directory'
+    )
+
     // Create helper script for communication API
     const helperScript = '#!/bin/bash\n' +
       '# Communication API helper for Clawdbot\n' +
@@ -1100,16 +1113,17 @@ During heartbeat, check the following:
       'Create communication helper script'
     )
 
-    // Add environment variables to bashrc
+    // Add environment variables to bashrc (use correct env var for the AI provider)
     const bashrcAdditions = `
 # Clawdbot configuration
 export NVM_DIR="\\$HOME/.nvm"
 [ -s "\\$NVM_DIR/nvm.sh" ] && . "\\$NVM_DIR/nvm.sh"
-export ANTHROPIC_API_KEY='${claudeApiKey}'
+${generateEnvExport(aiProvider, aiApiKey)}
 export TELEGRAM_BOT_TOKEN='${telegramBotToken}'
 export SAMANTHA_API_URL='${apiBaseUrl}'
 export SAMANTHA_USER_ID='${userId || ''}'
 export SAMANTHA_GATEWAY_TOKEN='${gatewayToken}'
+export SAMANTHA_AI_PROVIDER='${aiProvider}'
 `
 
     await this.runCommand(
@@ -1131,7 +1145,15 @@ BASHEOF`,
   /**
    * Start the Clawdbot gateway as a background process
    */
-  async startClawdbotGateway(claudeApiKey: string, telegramBotToken: string): Promise<boolean> {
+  async startClawdbotGateway(aiApiKey: string, telegramBotToken: string, aiProvider: AIProvider = 'anthropic'): Promise<boolean> {
+    const providerConfig = getAIProvider(aiProvider)
+    
+    // Generate the environment variable exports for the selected AI provider
+    const envExportLines = generateEnvExport(aiProvider, aiApiKey)
+    
+    // Determine which env var to check for logging
+    const envVarToCheck = aiProvider === 'kimi' ? 'OPENAI_API_KEY' : providerConfig.envVar
+    
     // Create startup script with better error handling
     const startupScript = `#!/bin/bash
 # Don't use set -e, we want to log errors
@@ -1143,13 +1165,14 @@ source ~/.bashrc 2>/dev/null || true
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 
-# Set environment variables
-export ANTHROPIC_API_KEY="${claudeApiKey}"
+# Set environment variables for AI provider
+${envExportLines}
 export TELEGRAM_BOT_TOKEN="${telegramBotToken}"
 
 # Log startup
 LOG_FILE="/tmp/clawdbot.log"
 echo "[$(date +'%Y-%m-%d %H:%M:%S')] Starting Clawdbot gateway..." >> "$LOG_FILE"
+echo "[$(date +'%Y-%m-%d %H:%M:%S')] AI Provider: ${aiProvider}" >> "$LOG_FILE"
 echo "[$(date +'%Y-%m-%d %H:%M:%S')] NVM_DIR: $NVM_DIR" >> "$LOG_FILE"
 echo "[$(date +'%Y-%m-%d %H:%M:%S')] Node version: $(node -v 2>&1 || echo 'node not found')" >> "$LOG_FILE"
 echo "[$(date +'%Y-%m-%d %H:%M:%S')] PATH: $PATH" >> "$LOG_FILE"
@@ -1165,10 +1188,13 @@ fi
 
 echo "[$(date +'%Y-%m-%d %H:%M:%S')] Clawdbot found: $(which clawdbot)" >> "$LOG_FILE"
 echo "[$(date +'%Y-%m-%d %H:%M:%S')] Running: clawdbot gateway run" >> "$LOG_FILE"
-if [ -n "$ANTHROPIC_API_KEY" ]; then
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] ANTHROPIC_API_KEY: SET" >> "$LOG_FILE"
+if [ -n "$${envVarToCheck}" ]; then
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] ${envVarToCheck}: SET" >> "$LOG_FILE"
 else
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] ANTHROPIC_API_KEY: NOT SET" >> "$LOG_FILE"
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] ${envVarToCheck}: NOT SET" >> "$LOG_FILE"
+fi
+if [ -n "$OPENAI_BASE_URL" ]; then
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] OPENAI_BASE_URL: $OPENAI_BASE_URL" >> "$LOG_FILE"
 fi
 if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] TELEGRAM_BOT_TOKEN: SET" >> "$LOG_FILE"
@@ -1179,6 +1205,8 @@ fi
 # Check config file exists
 if [ -f ~/.clawdbot/clawdbot.json ]; then
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] Config file exists" >> "$LOG_FILE"
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] Config contents:" >> "$LOG_FILE"
+    cat ~/.clawdbot/clawdbot.json >> "$LOG_FILE"
 else
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] WARNING: Config file not found at ~/.clawdbot/clawdbot.json" >> "$LOG_FILE"
 fi
@@ -1349,14 +1377,22 @@ chmod +x ~/vault-sync-daemon.sh`,
   }
 
   /**
-   * Store Claude API key securely
+   * Store AI API key securely (supports multiple providers)
    */
-  async storeClaudeKey(apiKey: string): Promise<boolean> {
+  async storeAIApiKey(apiKey: string, aiProvider: AIProvider = 'anthropic'): Promise<boolean> {
+    const envExport = generateEnvExport(aiProvider, apiKey)
     const result = await this.runCommand(
-      `echo 'export ANTHROPIC_API_KEY="${apiKey}"' >> ~/.bashrc`,
-      'Store Claude API key'
+      `echo '${envExport}' >> ~/.bashrc`,
+      `Store ${getAIProvider(aiProvider).displayName} API key`
     )
     return result.success
+  }
+  
+  /**
+   * @deprecated Use storeAIApiKey instead
+   */
+  async storeClaudeKey(apiKey: string): Promise<boolean> {
+    return this.storeAIApiKey(apiKey, 'anthropic')
   }
 
   /**
@@ -1366,7 +1402,8 @@ chmod +x ~/vault-sync-daemon.sh`,
     githubUsername: string
     githubEmail: string
     repoSshUrl: string
-    claudeApiKey: string
+    aiApiKey: string
+    aiProvider?: AIProvider
     orgoApiKey: string
     computerId: string
     telegramBotToken?: string
@@ -1435,7 +1472,8 @@ chmod +x ~/vault-sync-daemon.sh`,
       if (options.telegramBotToken) {
         this.onProgress?.({ step: 'telegram', message: 'Configuring Telegram connector with autonomous heartbeat...', success: true })
         const telegramOk = await this.setupClawdbotTelegram({
-          claudeApiKey: options.claudeApiKey,
+          aiApiKey: options.aiApiKey,
+          aiProvider: options.aiProvider,
           telegramBotToken: options.telegramBotToken,
           telegramUserId: options.telegramUserId,
           clawdbotVersion: clawdbotResult.version,
@@ -1446,17 +1484,19 @@ chmod +x ~/vault-sync-daemon.sh`,
         // 11. Start the Clawdbot gateway
         this.onProgress?.({ step: 'gateway', message: 'Starting Clawdbot gateway...', success: true })
         const gatewayOk = await this.startClawdbotGateway(
-          options.claudeApiKey,
-          options.telegramBotToken
+          options.aiApiKey,
+          options.telegramBotToken,
+          options.aiProvider
         )
         if (!gatewayOk) {
           // Gateway may still be starting, check /tmp/clawdbot.log
         }
       } else {
-        // Just store Claude API key if no Telegram
-        this.onProgress?.({ step: 'claude', message: 'Storing Claude API key...', success: true })
-        const claudeOk = await this.storeClaudeKey(options.claudeApiKey)
-        if (!claudeOk) throw new Error('Failed to store Claude API key')
+        // Just store AI API key if no Telegram
+        const providerName = getAIProvider(options.aiProvider || 'anthropic').displayName
+        this.onProgress?.({ step: 'apikey', message: `Storing ${providerName} API key...`, success: true })
+        const apiKeyOk = await this.storeAIApiKey(options.aiApiKey, options.aiProvider)
+        if (!apiKeyOk) throw new Error(`Failed to store ${providerName} API key`)
       }
 
       return { success: true }

@@ -69,8 +69,13 @@ model SetupState {
   // VM Provider selection
   vmProvider String? // orgo, aws, flyio
 
+  // AI Provider selection (anthropic, openai, kimi)
+  aiProvider String @default("anthropic")
+
   // API Keys (encrypted in production)
-  claudeApiKey String?
+  claudeApiKey String? // Anthropic API key
+  openaiApiKey String? // OpenAI API key
+  kimiApiKey   String? // Kimi/Moonshot API key
   orgoApiKey   String?
 
   // AWS Credentials (encrypted in production)

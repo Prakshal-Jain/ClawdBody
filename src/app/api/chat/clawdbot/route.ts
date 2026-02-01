@@ -12,6 +12,7 @@ import { findSetupStateDecrypted, findFirstVMDecrypted } from '@/lib/prisma-encr
 import { OrgoClient } from '@/lib/orgo'
 import { SSHTerminalProvider } from '@/lib/terminal/ssh-terminal'
 import { E2BClient } from '@/lib/e2b'
+import { AIProvider, getAIProvider, getApiKeyForProvider } from '@/lib/ai-providers'
 
 export const maxDuration = 300 // 5 minutes max for long responses
 
@@ -86,21 +87,26 @@ export async function POST(request: NextRequest) {
       .replace(/`/g, '\\`')
       .replace(/\$/g, '\\$')
     
-    // Get the Claude API key for the agent
-    const claudeApiKey = setupState.claudeApiKey
-    if (!claudeApiKey) {
-      return NextResponse.json({ error: 'Claude API key not configured' }, { status: 400 })
+    // Get the AI provider and API key
+    // Note: aiProvider may not exist in older records, default to 'anthropic'
+    const setupStateExtended = setupState as typeof setupState & { aiProvider?: string; openaiApiKey?: string | null; kimiApiKey?: string | null }
+    const aiProvider = (setupStateExtended.aiProvider || 'anthropic') as AIProvider
+    const providerConfig = getAIProvider(aiProvider)
+    const aiApiKey = getApiKeyForProvider(setupStateExtended, aiProvider)
+    
+    if (!aiApiKey) {
+      return NextResponse.json({ error: `${providerConfig.displayName} API key not configured` }, { status: 400 })
     }
     
     // Build the clawdbot command
     const clawdbotCommand = `clawdbot agent --local --session-id "${chatSessionId}" --message "${escapedMessage}"`
     
-    // Wrap command to source NVM and set ANTHROPIC_API_KEY for the agent
+    // Wrap command to source NVM and set the correct AI provider API key
     const wrappedCommand = `
 source ~/.bashrc 2>/dev/null || true
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-export ANTHROPIC_API_KEY="${claudeApiKey}"
+export ${providerConfig.envVar}="${aiApiKey}"
 ${clawdbotCommand}
 `.trim()
 
@@ -135,7 +141,7 @@ cat > /tmp/${jobId}.sh << 'SCRIPT_EOF'
 source ~/.bashrc 2>/dev/null || true
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-export ANTHROPIC_API_KEY="${claudeApiKey}"
+export ${providerConfig.envVar}="${aiApiKey}"
 ${clawdbotCommand} > ${outputFile} 2>&1
 echo $? > ${doneFile}
 SCRIPT_EOF
