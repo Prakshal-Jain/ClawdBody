@@ -101,14 +101,14 @@ const categoryConfig: Record<string, { label: string; color: string }> = {
   other: { label: 'Other', color: 'text-gray-400 bg-gray-400/10' },
 }
 
-// Auto-select CPU cores based on RAM
+// Auto-select CPU cores based on RAM (Orgo only accepts 4, 8, or 16 cores)
 const getOrgoCPUForRAM = (ram: number): number => {
   switch (ram) {
-    case 4: return 2
+    case 4: return 4
     case 8: return 4
-    case 16: return 4 // Could also be 8, needs testing
-    case 32: return 8
-    default: return 2
+    case 16: return 8
+    case 32: return 16
+    default: return 4
   }
 }
 
