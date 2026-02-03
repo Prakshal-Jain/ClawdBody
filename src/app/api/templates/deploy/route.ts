@@ -20,6 +20,9 @@ interface DeployRequest {
   // Orgo specific
   orgoProjectId?: string
   orgoProjectName?: string
+  // Setup credentials (to start setup immediately after VM creation)
+  claudeApiKey?: string
+  useStoredApiKey?: boolean
 }
 
 interface DeployResult {
@@ -60,7 +63,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<DeployRes
     }
 
     const body: DeployRequest = await request.json()
-    const { templateId, agentName, ram, orgoProjectId, orgoProjectName } = body
+    const { templateId, agentName, ram, orgoProjectId, orgoProjectName, claudeApiKey, useStoredApiKey } = body
 
     // Validate required fields
     if (!templateId || !agentName || !ram) {
@@ -323,6 +326,44 @@ fi
     })
 
     console.log(`[Deploy] VM record created: ${vm.id}`)
+
+    // === Step 7.25: Trigger setup if Anthropic API key provided (Telegram can be configured later) ===
+    const hasSetupCredentials = claudeApiKey || useStoredApiKey
+    if (hasSetupCredentials) {
+      console.log(`[Deploy] Triggering setup for VM ${vm.id}...`)
+      
+      const setupPayload = {
+        claudeApiKey: claudeApiKey || undefined,
+        useStoredApiKey: useStoredApiKey || false,
+        vmId: vm.id,
+      }
+
+      // Call the setup endpoint internally (fire and forget)
+      fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/setup/start`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          // Forward the session cookie for auth
+          'Cookie': request.headers.get('cookie') || '',
+        },
+        body: JSON.stringify(setupPayload),
+      }).then(async (res) => {
+        if (res.ok) {
+          console.log(`[Deploy] Setup triggered successfully for VM ${vm.id}`)
+        } else {
+          const error = await res.json().catch(() => ({}))
+          console.error(`[Deploy] Setup trigger failed for VM ${vm.id}:`, error)
+        }
+      }).catch(err => {
+        console.error(`[Deploy] Failed to trigger setup for VM ${vm.id}:`, err)
+      })
+
+      // Update VM status to indicate setup is in progress
+      await prisma.vM.update({
+        where: { id: vm.id },
+        data: { status: 'configuring_vm' },
+      })
+    }
 
     // === Step 7.5: Log deployment event ===
     try {

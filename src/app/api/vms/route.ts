@@ -33,6 +33,7 @@ export async function GET() {
         awsSecretAccessKey: true,
         awsRegion: true,
         e2bApiKey: true,
+        claudeApiKey: true,
       },
     })
 
@@ -115,6 +116,19 @@ export async function GET() {
       })
     }
 
+    // Get masked anthropic key if it exists
+    let anthropicApiKeyMasked: string | undefined
+    if (setupState?.claudeApiKey) {
+      try {
+        const decryptedKey = decrypt(setupState.claudeApiKey)
+        anthropicApiKeyMasked = decryptedKey.length > 16
+          ? `${decryptedKey.slice(0, 12)}...${decryptedKey.slice(-4)}`
+          : '***'
+      } catch {
+        // Key couldn't be decrypted, treat as no key
+      }
+    }
+
     return NextResponse.json({
       vms: validVMs,
       credentials: {
@@ -122,6 +136,8 @@ export async function GET() {
         hasAwsCredentials: !!(setupState?.awsAccessKeyId && setupState?.awsSecretAccessKey),
         awsRegion: setupState?.awsRegion || 'us-east-1',
         hasE2bApiKey: !!setupState?.e2bApiKey,
+        hasAnthropicApiKey: !!setupState?.claudeApiKey,
+        anthropicApiKeyMasked,
       },
     })
   } catch (error) {
@@ -160,6 +176,9 @@ export async function POST(request: NextRequest) {
       // E2B specific
       e2bTemplateId,
       e2bTimeout,
+      // Setup credentials (to start setup immediately after VM creation)
+      claudeApiKey,
+      useStoredApiKey,
     } = body
 
     if (!name || !provider) {
@@ -365,6 +384,36 @@ export async function POST(request: NextRequest) {
         e2bSandboxId,
       },
     })
+
+    // If Anthropic API key is provided, trigger setup immediately (Telegram can be configured later)
+    const hasSetupCredentials = claudeApiKey || useStoredApiKey
+    if (provisionNow && hasSetupCredentials && vm.vmCreated) {
+      // Trigger setup in background (don't wait for it to complete)
+      const setupPayload = {
+        claudeApiKey: claudeApiKey || undefined,
+        useStoredApiKey: useStoredApiKey || false,
+        vmId: vm.id,
+      }
+
+      // Call the setup endpoint internally (fire and forget)
+      fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/setup/start`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          // Forward the session cookie for auth
+          'Cookie': request.headers.get('cookie') || '',
+        },
+        body: JSON.stringify(setupPayload),
+      }).catch(err => {
+        console.error(`[VMs] Failed to trigger setup for VM ${vm.id}:`, err)
+      })
+
+      // Update VM status to indicate setup is in progress
+      await prisma.vM.update({
+        where: { id: vm.id },
+        data: { status: 'configuring_vm' },
+      })
+    }
 
     return NextResponse.json({ success: true, vm })
   } catch (error) {

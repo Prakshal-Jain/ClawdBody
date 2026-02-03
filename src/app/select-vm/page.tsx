@@ -61,6 +61,8 @@ interface Credentials {
   hasAwsCredentials: boolean
   awsRegion: string
   hasE2bApiKey: boolean
+  hasAnthropicApiKey: boolean
+  anthropicApiKeyMasked?: string
 }
 
 interface E2BTemplate {
@@ -207,6 +209,12 @@ export default function SelectVMPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Anthropic API key state (shared across modals)
+  const [anthropicApiKey, setAnthropicApiKey] = useState('')
+  const [isEditingAnthropicKey, setIsEditingAnthropicKey] = useState(false)
+  const [isDeletingAnthropicKey, setIsDeletingAnthropicKey] = useState(false)
+  const [isSavingAnthropicKey, setIsSavingAnthropicKey] = useState(false)
+
   // Orgo configuration modal state
   const [showOrgoModal, setShowOrgoModal] = useState(false)
   const [orgoApiKey, setOrgoApiKey] = useState('')
@@ -311,6 +319,64 @@ export default function SelectVMPage() {
     }
   }
 
+  // Handle saving the Anthropic API key
+  const handleSaveAnthropicKey = async () => {
+    if (!anthropicApiKey.trim()) return
+    
+    setIsSavingAnthropicKey(true)
+    try {
+      const response = await fetch('/api/setup/anthropic-key', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ claudeApiKey: anthropicApiKey.trim() }),
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        setCredentials(prev => prev ? {
+          ...prev,
+          hasAnthropicApiKey: true,
+          anthropicApiKeyMasked: data.maskedKey,
+        } : null)
+        setIsEditingAnthropicKey(false)
+      } else {
+        const error = await response.json()
+        setError(error.error || 'Failed to save API key')
+      }
+    } catch (error) {
+      setError('Failed to save API key')
+    } finally {
+      setIsSavingAnthropicKey(false)
+    }
+  }
+
+  // Handle deleting the Anthropic API key
+  const handleDeleteAnthropicKey = async () => {
+    setIsDeletingAnthropicKey(true)
+    try {
+      const response = await fetch('/api/setup/anthropic-key', {
+        method: 'DELETE',
+      })
+      
+      if (response.ok) {
+        setCredentials(prev => prev ? {
+          ...prev,
+          hasAnthropicApiKey: false,
+          anthropicApiKeyMasked: undefined,
+        } : null)
+        setAnthropicApiKey('')
+        setIsEditingAnthropicKey(false)
+      } else {
+        const error = await response.json()
+        setError(error.error || 'Failed to delete API key')
+      }
+    } catch (error) {
+      setError('Failed to delete API key')
+    } finally {
+      setIsDeletingAnthropicKey(false)
+    }
+  }
+
   const loadTemplates = async () => {
     setIsLoadingTemplates(true)
     try {
@@ -395,6 +461,13 @@ export default function SelectVMPage() {
       return
     }
 
+    // Validate Anthropic API key
+    const hasAnthropicKey = credentials?.hasAnthropicApiKey || anthropicApiKey.trim()
+    if (!hasAnthropicKey) {
+      setTemplateError('Please enter your Anthropic API key')
+      return
+    }
+
     setIsDeployingTemplate(true)
     setTemplateError(null)
     setDeploymentProgress('Creating VM and registering agent...')
@@ -409,6 +482,9 @@ export default function SelectVMPage() {
           ram: selectedTemplateRAM,
           orgoProjectId: selectedTemplateProject.id,
           orgoProjectName: selectedTemplateProject.name,
+          // Include setup credentials to start setup immediately
+          claudeApiKey: anthropicApiKey.trim() || undefined,
+          useStoredApiKey: !anthropicApiKey.trim() && credentials?.hasAnthropicApiKey,
         }),
       })
 
@@ -416,6 +492,11 @@ export default function SelectVMPage() {
 
       if (!res.ok) {
         throw new Error(data.error || 'Failed to deploy template')
+      }
+
+      // Save the Anthropic API key if a new one was provided
+      if (anthropicApiKey.trim()) {
+        await handleSaveAnthropicKey()
       }
 
       // Success! Close deploy modal and show success modal
@@ -448,6 +529,9 @@ export default function SelectVMPage() {
       setKeyValidated(false)
       setOrgoApiKey('')
     }
+    // Reset Anthropic key editing state but keep saved key
+    setIsEditingAnthropicKey(false)
+    setAnthropicApiKey('')
   }
 
   const closeTemplateSuccessModal = () => {
@@ -846,6 +930,13 @@ export default function SelectVMPage() {
       return
     }
 
+    // Validate Anthropic API key
+    const hasAnthropicKey = credentials?.hasAnthropicApiKey || anthropicApiKey.trim()
+    if (!hasAnthropicKey) {
+      setOrgoError('Please enter your Anthropic API key')
+      return
+    }
+
     setIsSubmitting(true)
     setError(null)
     setOrgoError(null)
@@ -863,6 +954,9 @@ export default function SelectVMPage() {
           orgoProjectName: selectedProject?.name,
           orgoRam: selectedOrgoRAM,
           orgoCpu: getOrgoCPUForRAM(selectedOrgoRAM),
+          // Include setup credentials to start setup immediately
+          claudeApiKey: anthropicApiKey.trim() || undefined,
+          useStoredApiKey: !anthropicApiKey.trim() && credentials?.hasAnthropicApiKey,
         }),
       })
 
@@ -878,9 +972,14 @@ export default function SelectVMPage() {
         throw new Error(data.error || 'Failed to create VM')
       }
 
+      // Save the Anthropic API key if a new one was provided
+      if (anthropicApiKey.trim()) {
+        await handleSaveAnthropicKey()
+      }
+
       closeOrgoModal()
 
-      // Redirect to learning-sources page for this VM
+      // Redirect to learning-sources page to view provisioning progress
       router.push(`/learning-sources?vmId=${data.vm.id}`)
     } catch (e) {
       setOrgoError(e instanceof Error ? e.message : 'Something went wrong')
@@ -900,6 +999,9 @@ export default function SelectVMPage() {
     setOrgoVMName('')
     setSelectedOrgoRAM(16) // Reset to recommended (16 GB)
     setShowDeleteOrgoConfirm(false)
+    // Reset Anthropic key editing state but keep saved key
+    setIsEditingAnthropicKey(false)
+    setAnthropicApiKey('')
   }
 
   const handleDeleteOrgoApiKey = async () => {
@@ -986,6 +1088,13 @@ export default function SelectVMPage() {
       return
     }
 
+    // Validate Anthropic API key
+    const hasAnthropicKey = credentials?.hasAnthropicApiKey || anthropicApiKey.trim()
+    if (!hasAnthropicKey) {
+      setAwsError('Please enter your Anthropic API key')
+      return
+    }
+
     setIsSubmitting(true)
     setError(null)
 
@@ -1014,6 +1123,9 @@ export default function SelectVMPage() {
           provisionNow: true, // Provision the EC2 instance immediately
           awsInstanceType,
           awsRegion,
+          // Include setup credentials to start setup immediately
+          claudeApiKey: anthropicApiKey.trim() || undefined,
+          useStoredApiKey: !anthropicApiKey.trim() && credentials?.hasAnthropicApiKey,
         }),
       })
 
@@ -1023,9 +1135,14 @@ export default function SelectVMPage() {
         throw new Error(data.error || 'Failed to provision EC2 instance')
       }
 
+      // Save the Anthropic API key if a new one was provided
+      if (anthropicApiKey.trim()) {
+        await handleSaveAnthropicKey()
+      }
+
       closeAWSModal()
 
-      // Redirect to learning-sources page for this VM
+      // Redirect to learning-sources page to view provisioning progress
       router.push(`/learning-sources?vmId=${data.vm.id}`)
     } catch (e) {
       setAwsError(e instanceof Error ? e.message : 'Failed to provision EC2 instance')
@@ -1044,6 +1161,9 @@ export default function SelectVMPage() {
     setAwsInstanceTypes([])
     setAwsError(null)
     setAwsVMName('')
+    // Reset Anthropic key editing state but keep saved key
+    setIsEditingAnthropicKey(false)
+    setAnthropicApiKey('')
   }
 
   // E2B handlers
@@ -1090,6 +1210,13 @@ export default function SelectVMPage() {
       return
     }
 
+    // Validate Anthropic API key
+    const hasAnthropicKey = credentials?.hasAnthropicApiKey || anthropicApiKey.trim()
+    if (!hasAnthropicKey) {
+      setE2bError('Please enter your Anthropic API key')
+      return
+    }
+
     setIsSubmitting(true)
     setError(null)
     setE2bError(null)
@@ -1105,6 +1232,9 @@ export default function SelectVMPage() {
           provisionNow: true, // Provision the sandbox immediately
           e2bTemplateId: selectedE2bTemplate,
           e2bTimeout: selectedE2bTimeout,
+          // Include setup credentials to start setup immediately
+          claudeApiKey: anthropicApiKey.trim() || undefined,
+          useStoredApiKey: !anthropicApiKey.trim() && credentials?.hasAnthropicApiKey,
         }),
       })
 
@@ -1120,9 +1250,14 @@ export default function SelectVMPage() {
         throw new Error(data.error || 'Failed to create sandbox')
       }
 
+      // Save the Anthropic API key if a new one was provided
+      if (anthropicApiKey.trim()) {
+        await handleSaveAnthropicKey()
+      }
+
       closeE2BModal()
 
-      // Redirect to learning-sources page for this VM
+      // Redirect to learning-sources page to view provisioning progress
       router.push(`/learning-sources?vmId=${data.vm.id}`)
     } catch (e) {
       setE2bError(e instanceof Error ? e.message : 'Something went wrong')
@@ -1140,6 +1275,9 @@ export default function SelectVMPage() {
     setSelectedE2bTimeout(3600)
     setE2bError(null)
     setE2bVMName('')
+    // Reset Anthropic key editing state but keep saved key
+    setIsEditingAnthropicKey(false)
+    setAnthropicApiKey('')
   }
 
   const handleDeleteVM = async (vmId: string) => {
@@ -2083,6 +2221,89 @@ export default function SelectVMPage() {
                   </motion.div>
                 )}
 
+                {/* Anthropic API Key Section */}
+                {keyValidated && !showDeleteOrgoConfirm && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.2 }}
+                    className="space-y-3"
+                  >
+                    <label className="text-sm font-medium text-sam-text flex items-center gap-2">
+                      <Key className="w-4 h-4 text-sam-accent" />
+                      Anthropic API Key
+                      <span className="text-sam-error">*</span>
+                    </label>
+                    
+                    {credentials?.hasAnthropicApiKey && !isEditingAnthropicKey ? (
+                      <div className="p-3 rounded-lg bg-green-500/5 border border-green-500/20">
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-green-400 flex items-center gap-2">
+                              <CheckCircle2 className="w-4 h-4" />
+                              Using saved API key
+                            </p>
+                            <p className="text-xs text-sam-text-dim font-mono mt-1 truncate">
+                              {credentials.anthropicApiKeyMasked}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setIsEditingAnthropicKey(true)}
+                              className="text-xs text-sam-text-dim hover:text-sam-text transition-colors"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={handleDeleteAnthropicKey}
+                              disabled={isDeletingAnthropicKey}
+                              className="text-xs text-sam-text-dim hover:text-sam-error transition-colors flex items-center gap-1"
+                            >
+                              {isDeletingAnthropicKey ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <Trash2 className="w-3 h-3" />
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex gap-2">
+                          <input
+                            type="password"
+                            value={anthropicApiKey}
+                            onChange={(e) => setAnthropicApiKey(e.target.value)}
+                            placeholder="sk-ant-api03-..."
+                            className="flex-1 px-4 py-2.5 rounded-lg bg-sam-bg border border-sam-border focus:border-sam-accent focus:ring-1 focus:ring-sam-accent/30 transition-all text-sam-text placeholder:text-sam-text-dim/50 font-mono text-sm"
+                          />
+                          {isEditingAnthropicKey && (
+                            <button
+                              onClick={() => {
+                                setIsEditingAnthropicKey(false)
+                                setAnthropicApiKey('')
+                              }}
+                              className="px-3 py-2 rounded-lg border border-sam-border text-sam-text-dim hover:text-sam-text text-sm transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          )}
+                        </div>
+                        <a
+                          href="https://console.anthropic.com/settings/keys"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs text-sam-accent hover:text-sam-accent/80"
+                        >
+                          Get your key from Anthropic Console
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+
                 {/* Error Display */}
                 {orgoError && (
                   <motion.div
@@ -2107,13 +2328,13 @@ export default function SelectVMPage() {
                 </button>
                 <button
                   onClick={handleOrgoConfirm}
-                  disabled={!keyValidated || isSubmitting || (orgoProjects.length > 0 && !selectedProject) || !orgoVMName.trim() || showDeleteOrgoConfirm}
+                  disabled={!keyValidated || isSubmitting || (orgoProjects.length > 0 && !selectedProject) || !orgoVMName.trim() || showDeleteOrgoConfirm || (!credentials?.hasAnthropicApiKey && !anthropicApiKey.trim())}
                   className="px-5 py-2.5 rounded-lg bg-sam-accent text-sam-bg font-medium text-sm hover:bg-sam-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   {isSubmitting ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      Adding VM...
+                      Provisioning...
                     </>
                   ) : (
                     <>
@@ -2371,6 +2592,82 @@ export default function SelectVMPage() {
                       </div>
                     </div>
 
+                    {/* Anthropic API Key Section */}
+                    <div className="space-y-3">
+                      <label className="text-sm font-medium text-sam-text flex items-center gap-2">
+                        <Key className="w-4 h-4 text-sam-accent" />
+                        Anthropic API Key
+                        <span className="text-sam-error">*</span>
+                      </label>
+                      
+                      {credentials?.hasAnthropicApiKey && !isEditingAnthropicKey ? (
+                        <div className="p-3 rounded-lg bg-green-500/5 border border-green-500/20">
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm text-green-400 flex items-center gap-2">
+                                <CheckCircle2 className="w-4 h-4" />
+                                Using saved API key
+                              </p>
+                              <p className="text-xs text-sam-text-dim font-mono mt-1 truncate">
+                                {credentials.anthropicApiKeyMasked}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => setIsEditingAnthropicKey(true)}
+                                className="text-xs text-sam-text-dim hover:text-sam-text transition-colors"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={handleDeleteAnthropicKey}
+                                disabled={isDeletingAnthropicKey}
+                                className="text-xs text-sam-text-dim hover:text-sam-error transition-colors flex items-center gap-1"
+                              >
+                                {isDeletingAnthropicKey ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <Trash2 className="w-3 h-3" />
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="flex gap-2">
+                            <input
+                              type="password"
+                              value={anthropicApiKey}
+                              onChange={(e) => setAnthropicApiKey(e.target.value)}
+                              placeholder="sk-ant-api03-..."
+                              className="flex-1 px-4 py-2.5 rounded-lg bg-sam-bg border border-sam-border focus:border-sam-accent focus:ring-1 focus:ring-sam-accent/30 transition-all text-sam-text placeholder:text-sam-text-dim/50 font-mono text-sm"
+                            />
+                            {isEditingAnthropicKey && (
+                              <button
+                                onClick={() => {
+                                  setIsEditingAnthropicKey(false)
+                                  setAnthropicApiKey('')
+                                }}
+                                className="px-3 py-2 rounded-lg border border-sam-border text-sam-text-dim hover:text-sam-text text-sm transition-colors"
+                              >
+                                Cancel
+                              </button>
+                            )}
+                          </div>
+                          <a
+                            href="https://console.anthropic.com/settings/keys"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-xs text-sam-accent hover:text-sam-accent/80"
+                          >
+                            Get your key from Anthropic Console
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
+                      )}
+                    </div>
+
                     {/* Permissions Notice */}
                     <div className="p-3 rounded-lg bg-sam-bg border border-sam-border">
                       <p className="text-xs text-sam-text-dim">
@@ -2400,7 +2697,7 @@ export default function SelectVMPage() {
                 </button>
                 <button
                   onClick={handleAWSConfirm}
-                  disabled={!awsKeyValidated || isSubmitting || !awsVMName.trim()}
+                  disabled={!awsKeyValidated || isSubmitting || !awsVMName.trim() || (!credentials?.hasAnthropicApiKey && !anthropicApiKey.trim())}
                   className="px-5 py-2.5 rounded-lg bg-sam-accent text-sam-bg font-medium text-sm hover:bg-sam-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   {isSubmitting ? (
@@ -2652,6 +2949,82 @@ export default function SelectVMPage() {
                       ) : null
                     })()}
 
+                    {/* Anthropic API Key Section */}
+                    <div className="space-y-3">
+                      <label className="text-sm font-medium text-sam-text flex items-center gap-2">
+                        <Key className="w-4 h-4 text-sam-accent" />
+                        Anthropic API Key
+                        <span className="text-sam-error">*</span>
+                      </label>
+                      
+                      {credentials?.hasAnthropicApiKey && !isEditingAnthropicKey ? (
+                        <div className="p-3 rounded-lg bg-green-500/5 border border-green-500/20">
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm text-green-400 flex items-center gap-2">
+                                <CheckCircle2 className="w-4 h-4" />
+                                Using saved API key
+                              </p>
+                              <p className="text-xs text-sam-text-dim font-mono mt-1 truncate">
+                                {credentials.anthropicApiKeyMasked}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => setIsEditingAnthropicKey(true)}
+                                className="text-xs text-sam-text-dim hover:text-sam-text transition-colors"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={handleDeleteAnthropicKey}
+                                disabled={isDeletingAnthropicKey}
+                                className="text-xs text-sam-text-dim hover:text-sam-error transition-colors flex items-center gap-1"
+                              >
+                                {isDeletingAnthropicKey ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <Trash2 className="w-3 h-3" />
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="flex gap-2">
+                            <input
+                              type="password"
+                              value={anthropicApiKey}
+                              onChange={(e) => setAnthropicApiKey(e.target.value)}
+                              placeholder="sk-ant-api03-..."
+                              className="flex-1 px-4 py-2.5 rounded-lg bg-sam-bg border border-sam-border focus:border-sam-accent focus:ring-1 focus:ring-sam-accent/30 transition-all text-sam-text placeholder:text-sam-text-dim/50 font-mono text-sm"
+                            />
+                            {isEditingAnthropicKey && (
+                              <button
+                                onClick={() => {
+                                  setIsEditingAnthropicKey(false)
+                                  setAnthropicApiKey('')
+                                }}
+                                className="px-3 py-2 rounded-lg border border-sam-border text-sam-text-dim hover:text-sam-text text-sm transition-colors"
+                              >
+                                Cancel
+                              </button>
+                            )}
+                          </div>
+                          <a
+                            href="https://console.anthropic.com/settings/keys"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-xs text-sam-accent hover:text-sam-accent/80"
+                          >
+                            Get your key from Anthropic Console
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
+                      )}
+                    </div>
+
                     {/* E2B Info Notice */}
                     <div className="p-3 rounded-lg bg-sam-bg border border-sam-border">
                       <p className="text-xs text-sam-text-dim">
@@ -2681,7 +3054,7 @@ export default function SelectVMPage() {
                 </button>
                 <button
                   onClick={handleE2BConfirm}
-                  disabled={!e2bKeyValidated || isSubmitting || !e2bVMName.trim()}
+                  disabled={!e2bKeyValidated || isSubmitting || !e2bVMName.trim() || (!credentials?.hasAnthropicApiKey && !anthropicApiKey.trim())}
                   className="px-5 py-2.5 rounded-lg bg-sam-accent text-sam-bg font-medium text-sm hover:bg-sam-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   {isSubmitting ? (
@@ -3043,6 +3416,82 @@ export default function SelectVMPage() {
                   </motion.div>
                 )}
 
+                {/* Anthropic API Key Section */}
+                <div className="space-y-3">
+                  <label className="text-sm font-medium text-sam-text flex items-center gap-2">
+                    <Key className="w-4 h-4 text-sam-accent" />
+                    Anthropic API Key
+                    <span className="text-sam-error">*</span>
+                  </label>
+                  
+                  {credentials?.hasAnthropicApiKey && !isEditingAnthropicKey ? (
+                    <div className="p-3 rounded-lg bg-green-500/5 border border-green-500/20">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-green-400 flex items-center gap-2">
+                            <CheckCircle2 className="w-4 h-4" />
+                            Using saved API key
+                          </p>
+                          <p className="text-xs text-sam-text-dim font-mono mt-1 truncate">
+                            {credentials.anthropicApiKeyMasked}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setIsEditingAnthropicKey(true)}
+                            className="text-xs text-sam-text-dim hover:text-sam-text transition-colors"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={handleDeleteAnthropicKey}
+                            disabled={isDeletingAnthropicKey}
+                            className="text-xs text-sam-text-dim hover:text-sam-error transition-colors flex items-center gap-1"
+                          >
+                            {isDeletingAnthropicKey ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-3 h-3" />
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="flex gap-2">
+                        <input
+                          type="password"
+                          value={anthropicApiKey}
+                          onChange={(e) => setAnthropicApiKey(e.target.value)}
+                          placeholder="sk-ant-api03-..."
+                          className="flex-1 px-4 py-2.5 rounded-lg bg-sam-bg border border-sam-border focus:border-sam-accent focus:ring-1 focus:ring-sam-accent/30 transition-all text-sam-text placeholder:text-sam-text-dim/50 font-mono text-sm"
+                        />
+                        {isEditingAnthropicKey && (
+                          <button
+                            onClick={() => {
+                              setIsEditingAnthropicKey(false)
+                              setAnthropicApiKey('')
+                            }}
+                            className="px-3 py-2 rounded-lg border border-sam-border text-sam-text-dim hover:text-sam-text text-sm transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        )}
+                      </div>
+                      <a
+                        href="https://console.anthropic.com/settings/keys"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-sam-accent hover:text-sam-accent/80"
+                      >
+                        Get your key from Anthropic Console
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                  )}
+                </div>
+
                 {/* Loading Projects Notice */}
                 {isLoadingProjectsForTemplate && (
                   <motion.div
@@ -3080,7 +3529,7 @@ export default function SelectVMPage() {
                 </button>
                 <button
                   onClick={handleDeployTemplate}
-                  disabled={isDeployingTemplate || isLoadingProjectsForTemplate || isValidatingKey || !templateAgentName.trim() || !selectedTemplateProject || (!credentials?.hasOrgoApiKey && !keyValidated)}
+                  disabled={isDeployingTemplate || isLoadingProjectsForTemplate || isValidatingKey || !templateAgentName.trim() || !selectedTemplateProject || (!credentials?.hasOrgoApiKey && !keyValidated) || (!credentials?.hasAnthropicApiKey && !anthropicApiKey.trim())}
                   className="px-5 py-2.5 rounded-lg bg-sam-accent text-sam-bg font-medium text-sm hover:bg-sam-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   {isDeployingTemplate ? (

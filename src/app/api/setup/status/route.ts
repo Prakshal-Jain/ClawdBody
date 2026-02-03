@@ -38,6 +38,12 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: 'VM not found' }, { status: 404 })
       }
 
+      // Get SetupState to check for stored Anthropic API key
+      const setupState = await prisma.setupState.findUnique({
+        where: { userId: session.user.id },
+        select: { claudeApiKey: true },
+      })
+
       const response: Record<string, unknown> = {
         status: vm.status,
         vmCreated: vm.vmCreated,
@@ -48,6 +54,8 @@ export async function GET(request: NextRequest) {
         vmProvider: vm.provider,
         vmId: vm.id,
         vmName: vm.name,
+        // Indicate if user has a stored Anthropic API key
+        hasAnthropicApiKey: !!setupState?.claudeApiKey,
       }
 
       // Add provider-specific fields
@@ -98,6 +106,8 @@ export async function GET(request: NextRequest) {
       gatewayStarted: setupState.gatewayStarted,
       errorMessage: setupState.errorMessage,
       vmProvider: setupState.vmProvider,
+      // Indicate if user has a stored Anthropic API key
+      hasAnthropicApiKey: !!setupState.claudeApiKey,
     }
 
     // Add provider-specific fields

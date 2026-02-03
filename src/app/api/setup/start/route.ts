@@ -20,16 +20,34 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { claudeApiKey, telegramBotToken, telegramUserId, vmId } = await request.json()
-
-    if (!claudeApiKey) {
-      return NextResponse.json({ error: 'Claude API key is required' }, { status: 400 })
+    const { claudeApiKey, useStoredApiKey, telegramBotToken, telegramUserId, vmId } = await request.json() as {
+      claudeApiKey?: string
+      useStoredApiKey?: boolean
+      telegramBotToken?: string
+      telegramUserId?: string
+      vmId?: string
     }
 
     // Get existing setup state to retrieve user's provider config
     let setupState = await prisma.setupState.findUnique({
       where: { userId: session.user.id },
     })
+
+    // Determine the API key to use
+    let finalClaudeApiKey: string | null = claudeApiKey || null
+
+    if (!claudeApiKey && useStoredApiKey) {
+      // User wants to use the stored API key
+      if (!setupState?.claudeApiKey) {
+        return NextResponse.json({ error: 'No stored API key found. Please provide a Claude API key.' }, { status: 400 })
+      }
+      // Decrypt the stored key for use
+      finalClaudeApiKey = decrypt(setupState.claudeApiKey)
+    }
+
+    if (!finalClaudeApiKey) {
+      return NextResponse.json({ error: 'Claude API key is required' }, { status: 400 })
+    }
 
     // If vmId is provided, get the VM to determine provider
     let vm = null
@@ -81,11 +99,15 @@ export async function POST(request: NextRequest) {
     // Check if VM is already provisioned (has a cloud resource)
     const isVMAlreadyProvisioned = vm && vm.vmCreated && (vm.orgoComputerId || vm.awsInstanceId || vm.e2bSandboxId)
 
+    // Only encrypt and store a new key if provided (not using stored key)
+    const encryptedClaudeApiKey = claudeApiKey ? encrypt(claudeApiKey) : undefined
+
     if (!setupState) {
       setupState = await prisma.setupState.create({
         data: {
           userId: session.user.id,
-          claudeApiKey: encrypt(claudeApiKey),
+          // Only update the key if a new one was provided
+          ...(encryptedClaudeApiKey ? { claudeApiKey: encryptedClaudeApiKey } : {}),
           status: isVMAlreadyProvisioned ? 'configuring_vm' : 'provisioning',
           // Sync vmCreated from the VM if it's already provisioned
           vmCreated: isVMAlreadyProvisioned ? true : false,
@@ -99,7 +121,8 @@ export async function POST(request: NextRequest) {
       setupState = await prisma.setupState.update({
         where: { id: setupState.id },
         data: {
-          claudeApiKey: encrypt(claudeApiKey),
+          // Only update the key if a new one was provided
+          ...(encryptedClaudeApiKey ? { claudeApiKey: encryptedClaudeApiKey } : {}),
           status: isVMAlreadyProvisioned ? 'configuring_vm' : 'provisioning',
           errorMessage: null,
           // Only reset vmCreated if the VM hasn't been provisioned yet
@@ -132,7 +155,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Start async setup process based on provider
-    // Note: claudeApiKey is passed as-is (plaintext from request), but provider keys are decrypted from DB
+    // Note: finalClaudeApiKey is either plaintext from request or decrypted from stored key
     if (vmProvider === 'aws') {
       // Type assertion to access AWS fields
       const awsState = setupState as SetupState & {
@@ -146,7 +169,7 @@ export async function POST(request: NextRequest) {
       const decryptedSecretAccessKey = decrypt(awsState.awsSecretAccessKey!)
       runAWSSetupProcess(
         session.user.id,
-        claudeApiKey,
+        finalClaudeApiKey,
         decryptedAccessKeyId,
         decryptedSecretAccessKey,
         awsState.awsRegion || 'us-east-1',
@@ -162,7 +185,7 @@ export async function POST(request: NextRequest) {
       const decryptedE2bApiKey = decrypt(e2bState.e2bApiKey!)
       runE2BSetupProcess(
         session.user.id,
-        claudeApiKey,
+        finalClaudeApiKey,
         decryptedE2bApiKey,
         vm?.e2bTemplateId || 'base',
         vm?.e2bTimeout || 3600,
@@ -177,7 +200,7 @@ export async function POST(request: NextRequest) {
       const decryptedOrgoApiKey = decrypt(setupState.orgoApiKey!)
       runSetupProcess(
         session.user.id,
-        claudeApiKey,
+        finalClaudeApiKey,
         decryptedOrgoApiKey,
         vm?.orgoProjectName || setupState.orgoProjectName || 'claude-brain',
         telegramBotToken,

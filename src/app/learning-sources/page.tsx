@@ -126,6 +126,8 @@ interface SetupStatus {
   // Common
   errorMessage?: string
   vmProvider?: string
+  // Stored API key status
+  hasAnthropicApiKey?: boolean
 }
 
 interface VMInfo {
@@ -236,6 +238,13 @@ function LearningSourcesContent() {
   const [telegramBotToken, setTelegramBotToken] = useState('')
   const [telegramUserId, setTelegramUserId] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  
+  // Stored Anthropic API key management
+  const [hasStoredApiKey, setHasStoredApiKey] = useState(false)
+  const [storedApiKeyMasked, setStoredApiKeyMasked] = useState<string | null>(null)
+  const [isEditingApiKey, setIsEditingApiKey] = useState(false)
+  const [isDeletingApiKey, setIsDeletingApiKey] = useState(false)
+  const [isSavingApiKey, setIsSavingApiKey] = useState(false)
   const [setupError, setSetupError] = useState<string | null>(null)
   const [showSetupProgress, setShowSetupProgress] = useState(false)
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null)
@@ -300,6 +309,81 @@ function LearningSourcesContent() {
   useEffect(() => {
     fetchIntegrationStatus()
   }, [fetchIntegrationStatus, refreshKey])
+
+  // Fetch stored Anthropic API key status on mount
+  const fetchStoredApiKey = useCallback(async () => {
+    try {
+      const response = await fetch('/api/setup/anthropic-key')
+      if (response.ok) {
+        const data = await response.json()
+        setHasStoredApiKey(data.hasKey)
+        setStoredApiKeyMasked(data.maskedKey)
+        // If user has a stored key and isn't editing, don't show the input
+        if (data.hasKey && !isEditingApiKey) {
+          setClaudeApiKey('') // Clear any manual input
+        }
+      }
+    } catch (error) {
+      // Silently fail - user can still enter key manually
+    }
+  }, [isEditingApiKey])
+
+  useEffect(() => {
+    fetchStoredApiKey()
+  }, [fetchStoredApiKey])
+
+  // Handle saving a new API key
+  const handleSaveApiKey = async () => {
+    if (!claudeApiKey.trim()) return
+    
+    setIsSavingApiKey(true)
+    try {
+      const response = await fetch('/api/setup/anthropic-key', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ claudeApiKey: claudeApiKey.trim() }),
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        setHasStoredApiKey(true)
+        setStoredApiKeyMasked(data.maskedKey)
+        setIsEditingApiKey(false)
+        // Keep the key in state for the current setup session
+      } else {
+        const error = await response.json()
+        setSetupError(error.error || 'Failed to save API key')
+      }
+    } catch (error) {
+      setSetupError('Failed to save API key')
+    } finally {
+      setIsSavingApiKey(false)
+    }
+  }
+
+  // Handle deleting the stored API key
+  const handleDeleteApiKey = async () => {
+    setIsDeletingApiKey(true)
+    try {
+      const response = await fetch('/api/setup/anthropic-key', {
+        method: 'DELETE',
+      })
+      
+      if (response.ok) {
+        setHasStoredApiKey(false)
+        setStoredApiKeyMasked(null)
+        setClaudeApiKey('')
+        setIsEditingApiKey(false)
+      } else {
+        const error = await response.json()
+        setSetupError(error.error || 'Failed to delete API key')
+      }
+    } catch (error) {
+      setSetupError('Failed to delete API key')
+    } finally {
+      setIsDeletingApiKey(false)
+    }
+  }
 
   useEffect(() => {
     // Handle OAuth callback parameters
@@ -516,7 +600,9 @@ function LearningSourcesContent() {
   }, [showSetupProgress, addLog])
 
   const handleStartSetup = async () => {
-    if (!claudeApiKey.trim()) {
+    // Check if we have either a new key or a stored key
+    const hasKey = claudeApiKey.trim() || hasStoredApiKey
+    if (!hasKey) {
       setSetupError('Claude API key is required')
       return
     }
@@ -530,7 +616,9 @@ function LearningSourcesContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          claudeApiKey,
+          // Send the new key if provided, otherwise signal to use stored key
+          claudeApiKey: claudeApiKey.trim() || undefined,
+          useStoredApiKey: !claudeApiKey.trim() && hasStoredApiKey,
           telegramBotToken: telegramBotToken.trim() || undefined,
           telegramUserId: telegramUserId.trim() || undefined,
           vmId, // Pass vmId so the backend updates the correct VM
@@ -545,7 +633,7 @@ function LearningSourcesContent() {
       // Show progress view
       setShowSetupProgress(true)
       addLog('info', 'Setup process started...')
-      addLog('info', 'Creating Orgo VM...')
+      addLog('info', 'Creating VM...')
 
       // Clear the input
       setClaudeApiKey('')
@@ -763,24 +851,101 @@ function LearningSourcesContent() {
                     <label className="block text-sm font-mono text-sam-text-dim mb-2">
                       Claude API Key <span className="text-sam-error">*</span>
                     </label>
-                    <div className="relative">
-                      <input
-                        type="password"
-                        value={claudeApiKey}
-                        onChange={(e) => setClaudeApiKey(e.target.value)}
-                        placeholder="sk-ant-api03-..."
-                        className="w-full px-4 py-3 rounded-lg bg-sam-bg border border-sam-border focus:border-sam-accent outline-none font-mono text-sm transition-colors"
-                      />
-                    </div>
-                    <a
-                      href="https://console.anthropic.com/settings/keys"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 mt-2 text-xs text-sam-accent hover:underline"
-                    >
-                      Get your key from Anthropic Console
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
+                    
+                    {/* Show stored key with edit/delete options */}
+                    {hasStoredApiKey && !isEditingApiKey ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-3 p-3 rounded-lg bg-sam-accent/10 border border-sam-accent/30">
+                          <Key className="w-5 h-5 text-sam-accent flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sam-text font-mono text-sm truncate">
+                              {storedApiKeyMasked || 'API key stored'}
+                            </p>
+                            <p className="text-xs text-sam-text-dim mt-0.5">
+                              Your key is securely stored and will be reused across VMs
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setIsEditingApiKey(true)}
+                              className="px-3 py-1.5 text-xs font-mono text-sam-text-dim hover:text-sam-text border border-sam-border hover:border-sam-accent/50 rounded-lg transition-colors"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleDeleteApiKey}
+                              disabled={isDeletingApiKey}
+                              className="px-3 py-1.5 text-xs font-mono text-sam-error/70 hover:text-sam-error border border-sam-error/30 hover:border-sam-error/50 rounded-lg transition-colors disabled:opacity-50"
+                            >
+                              {isDeletingApiKey ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <Trash2 className="w-3 h-3" />
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      /* Show input field when no key is stored or when editing */
+                      <div className="space-y-3">
+                        <div className="relative">
+                          <input
+                            type="password"
+                            value={claudeApiKey}
+                            onChange={(e) => setClaudeApiKey(e.target.value)}
+                            placeholder="sk-ant-api03-..."
+                            className="w-full px-4 py-3 rounded-lg bg-sam-bg border border-sam-border focus:border-sam-accent outline-none font-mono text-sm transition-colors"
+                          />
+                        </div>
+                        
+                        {/* Show save/cancel buttons when editing */}
+                        {isEditingApiKey && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={handleSaveApiKey}
+                              disabled={isSavingApiKey || !claudeApiKey.trim()}
+                              className="px-4 py-2 text-xs font-mono bg-sam-accent text-sam-bg rounded-lg hover:bg-sam-accent-dim disabled:opacity-50 transition-colors flex items-center gap-2"
+                            >
+                              {isSavingApiKey ? (
+                                <>
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  Saving...
+                                </>
+                              ) : (
+                                <>
+                                  <Check className="w-3 h-3" />
+                                  Save Key
+                                </>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsEditingApiKey(false)
+                                setClaudeApiKey('')
+                              }}
+                              className="px-4 py-2 text-xs font-mono text-sam-text-dim hover:text-sam-text border border-sam-border hover:border-sam-accent/50 rounded-lg transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        )}
+                        
+                        <a
+                          href="https://console.anthropic.com/settings/keys"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs text-sam-accent hover:underline"
+                        >
+                          Get your key from Anthropic Console
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -822,7 +987,7 @@ function LearningSourcesContent() {
 
                 <button
                   onClick={handleStartSetup}
-                  disabled={isSubmitting || !claudeApiKey.trim() || !telegramBotToken.trim() || !telegramUserId.trim()}
+                  disabled={isSubmitting || (!claudeApiKey.trim() && !hasStoredApiKey) || !telegramBotToken.trim() || !telegramUserId.trim()}
                   className="mt-8 w-full flex items-center justify-center gap-2 px-6 py-4 rounded-xl bg-sam-accent text-sam-bg font-display font-semibold hover:bg-sam-accent-dim disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                 >
                   {isSubmitting ? (
