@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useSession, signOut } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Loader2, ArrowRight, CheckCircle2, LogOut, X, Key, FolderPlus, AlertCircle, ExternalLink, Globe, Server, Plus, Trash2, Play, Power, ArrowLeft, ExternalLinkIcon, Settings, Rocket, ChevronDown, ChevronUp, Sparkles, PenTool, User, Lightbulb, Share2, Link2, Check } from 'lucide-react'
+import { Loader2, ArrowRight, CheckCircle2, LogOut, X, Key, FolderPlus, AlertCircle, ExternalLink, Globe, Server, Plus, Trash2, Play, Power, ArrowLeft, ExternalLinkIcon, Settings, Rocket, ChevronDown, ChevronUp, ChevronRight, Sparkles, PenTool, User, Lightbulb, Share2, Link2, Check } from 'lucide-react'
 import type { Template, TemplateIdea } from '@/lib/templates'
 import { TEMPLATE_IDEAS, isEmojiLogo } from '@/lib/templates'
 
@@ -142,20 +142,20 @@ const getOrgoCPUForRAM = (ram: number): number => {
 
 const vmOptions: VMOption[] = [
   {
-    id: 'orgo',
-    name: 'Orgo',
-    description: 'Fast, reliable virtual machines optimized for AI workloads with GUI.',
-    icon: <img src="/logos/orgo.png" alt="Orgo" className="w-12 h-12 object-contain" />,
-    available: true,
-    url: 'https://orgo.ai',
-  },
-  {
     id: 'aws',
     name: 'AWS EC2',
     description: 'Enterprise-grade cloud infrastructure. Pay-as-you-go pricing.',
     icon: <img src="/logos/aws.png" alt="AWS" className="w-12 h-12 object-contain" />,
     available: true,
     url: 'https://aws.amazon.com',
+  },
+  {
+    id: 'orgo',
+    name: 'Orgo',
+    description: 'Fast, reliable virtual machines optimized for AI workloads with GUI.',
+    icon: <img src="/logos/orgo.png" alt="Orgo" className="w-12 h-12 object-contain" />,
+    available: true,
+    url: 'https://orgo.ai',
   },
   {
     id: 'e2b',
@@ -234,6 +234,7 @@ export default function SelectVMPage() {
   // General state
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [isAddVMCollapsed, setIsAddVMCollapsed] = useState(true) // Collapsed by default
 
   // LLM API key state (unified across all providers)
   const [llmApiKey, setLlmApiKey] = useState('')
@@ -341,7 +342,7 @@ export default function SelectVMPage() {
   const [trendingTemplates, setTrendingTemplates] = useState<(Template & { stats?: { deployCount: number; shareCount: number; recentActivity: number } })[]>([])
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(true)
   const [templatePage, setTemplatePage] = useState(0)
-  const TEMPLATES_PER_PAGE = 6
+  const TEMPLATES_PER_PAGE = 9
   const [showTemplateDeployModal, setShowTemplateDeployModal] = useState(false)
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
   const [templateAgentName, setTemplateAgentName] = useState('')
@@ -1616,10 +1617,10 @@ export default function SelectVMPage() {
           className="mb-8 text-center"
         >
           <h1 className="text-4xl md:text-5xl font-display font-bold mb-4 text-sam-text leading-tight">
-            Your Virtual Machines
+            Your OpenClaws 🦞
           </h1>
           <p className="text-lg text-sam-text-dim max-w-2xl mx-auto font-body leading-relaxed">
-            Manage your AI agent VMs. You can run multiple VMs from different providers simultaneously.
+            Your AI workflow deployments
           </p>
         </motion.div>
 
@@ -1643,18 +1644,60 @@ export default function SelectVMPage() {
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-8 h-8 animate-spin text-sam-accent" />
           </div>
-        ) : userVMs.length > 0 && (
+        ) : userVMs.length === 0 ? (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.1 }}
             className="mb-8"
           >
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-display font-semibold text-sam-text flex items-center gap-2">
-                <Server className="w-5 h-5 text-sam-accent" />
-                Active VMs ({userVMs.length})
-              </h2>
+            {/* Empty State - 1-Click Deploy Card */}
+            <div className="p-8 rounded-2xl border-2 border-dashed border-sam-border bg-sam-surface/30 text-center">
+              <Server className="w-12 h-12 text-sam-text-dim mx-auto mb-4" />
+              <button
+                className="px-6 py-3 rounded-lg bg-sam-accent text-sam-bg font-medium hover:bg-sam-accent/90 transition-colors flex items-center gap-2 mx-auto"
+              >
+                <Rocket className="w-4 h-4" />
+                Deploy with 1-Click
+              </button>
+              <button className="mt-3 text-sm text-sam-text-dim/60 hover:text-sam-text-dim transition-colors flex flex-col items-center gap-1 text-center mx-auto">
+                <span>or bring your own API keys</span>
+                <span className="flex items-center justify-center gap-1.5 text-xs">
+                  <span>free</span>
+                  <span className="text-sam-text-dim/50">•</span>
+                  <span>~20 mins</span>
+                </span>
+              </button>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.1 }}
+            className="mb-8"
+          >
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-xl font-display font-semibold text-sam-text flex items-center gap-2">
+                  <Server className="w-5 h-5 text-sam-accent" />
+                  Active VMs ({userVMs.length})
+                </h2>
+                <div className="flex flex-col items-end gap-1">
+                  <button
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-sam-accent/10 border border-sam-accent/30 text-sam-accent text-sm font-medium hover:bg-sam-accent/20 hover:border-sam-accent/50 transition-all"
+                  >
+                    <Rocket className="w-4 h-4" />
+                    Deploy 1-Click
+                  </button>
+                  <button className="text-xs text-sam-text-dim/60 hover:text-sam-text-dim transition-colors flex items-center justify-center gap-1.5 text-center">
+                    <span>or bring your own API keys</span>
+                    <span>free</span>
+                    <span className="text-sam-text-dim/50">•</span>
+                    <span>~20 mins</span>
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1962,12 +2005,31 @@ export default function SelectVMPage() {
           transition={{ duration: 0.6, delay: 0.2 }}
           className="mb-8"
         >
-          <h2 className="text-xl font-display font-semibold text-sam-text mb-4 flex items-center gap-2">
-            <Plus className="w-5 h-5 text-sam-accent" />
-            Add a New VM
-          </h2>
+          <button
+            onClick={() => setIsAddVMCollapsed(!isAddVMCollapsed)}
+            className="w-full text-left mb-4 flex items-center justify-between gap-2 hover:opacity-80 transition-opacity"
+          >
+            <h2 className="text-xl font-display font-semibold text-sam-text flex items-center gap-2">
+              <Plus className="w-5 h-5 text-sam-accent" />
+              Add a New VM
+            </h2>
+            {isAddVMCollapsed ? (
+              <ChevronRight className="w-5 h-5 text-sam-text-dim" />
+            ) : (
+              <ChevronDown className="w-5 h-5 text-sam-text-dim" />
+            )}
+          </button>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <AnimatePresence initial={false}>
+            {!isAddVMCollapsed && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.3 }}
+                className="overflow-hidden"
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {vmOptions.map((option, index) => {
               const isDisabled = !option.available || isSubmitting
 
@@ -2038,46 +2100,49 @@ export default function SelectVMPage() {
                 </motion.button>
               )
             })}
-          </div>
-
-          {/* Custom Provider Card - Full Width */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.5 }}
-            className="relative mt-6 p-6 rounded-xl border-2 bg-gradient-to-br from-sam-surface/40 to-sam-surface/20 hover:from-sam-surface/50 hover:to-sam-surface/30 transition-all duration-300"
-            style={{
-              borderImage: 'linear-gradient(135deg, rgba(244, 114, 182, 0.3), rgba(139, 92, 246, 0.3), rgba(59, 130, 246, 0.3)) 1',
-            }}
-          >
-            {/* Gradient border effect */}
-            <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-pink-500/20 via-purple-500/20 to-blue-500/20 opacity-50 blur-sm -z-10" />
-
-            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-              <div className="flex-1 text-center md:text-left">
-                <div className="flex items-center justify-center md:justify-start gap-2 mb-2">
-                  <Plus className="w-5 h-5 text-sam-accent" />
-                  <h3 className="text-xl font-display font-semibold text-sam-text">
-                    Add Your Own VM Provider
-                  </h3>
                 </div>
-                <p className="text-sm text-sam-text-dim font-body leading-relaxed mb-2">
-                  Have a preferred cloud provider? Our AI agents can build a native integration for your VM provider in minutes, seamlessly connecting it to ClawdBody.
-                </p>
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sam-accent/10 border border-sam-accent/30">
-                  <span className="text-xs font-mono text-sam-accent">🚀 Marketplace Coming Soon</span>
-                </div>
-              </div>
-              <div className="flex-shrink-0">
-                <button
-                  disabled
-                  className="px-6 py-3 rounded-lg bg-gradient-to-r from-pink-500/20 via-purple-500/20 to-blue-500/20 border border-sam-border text-sam-text-dim font-medium hover:border-sam-accent/50 transition-all cursor-not-allowed opacity-60"
+
+                {/* Custom Provider Card - Full Width */}
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5, delay: 0.5 }}
+                  className="relative mt-6 p-6 rounded-xl border-2 bg-gradient-to-br from-sam-surface/40 to-sam-surface/20 hover:from-sam-surface/50 hover:to-sam-surface/30 transition-all duration-300"
+                  style={{
+                    borderImage: 'linear-gradient(135deg, rgba(244, 114, 182, 0.3), rgba(139, 92, 246, 0.3), rgba(59, 130, 246, 0.3)) 1',
+                  }}
                 >
-                  Coming Soon
-                </button>
-              </div>
-            </div>
-          </motion.div>
+                  {/* Gradient border effect */}
+                  <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-pink-500/20 via-purple-500/20 to-blue-500/20 opacity-50 blur-sm -z-10" />
+
+                  <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                    <div className="flex-1 text-center md:text-left">
+                      <div className="flex items-center justify-center md:justify-start gap-2 mb-2">
+                        <Plus className="w-5 h-5 text-sam-accent" />
+                        <h3 className="text-xl font-display font-semibold text-sam-text">
+                          Add Your Own VM Provider
+                        </h3>
+                      </div>
+                      <p className="text-sm text-sam-text-dim font-body leading-relaxed mb-2">
+                        Have a preferred cloud provider? Our AI agents can build a native integration for your VM provider in minutes, seamlessly connecting it to ClawdBody.
+                      </p>
+                      <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sam-accent/10 border border-sam-accent/30">
+                        <span className="text-xs font-mono text-sam-accent">🚀 Marketplace Coming Soon</span>
+                      </div>
+                    </div>
+                    <div className="flex-shrink-0">
+                      <button
+                        disabled
+                        className="px-6 py-3 rounded-lg bg-gradient-to-r from-pink-500/20 via-purple-500/20 to-blue-500/20 border border-sam-border text-sam-text-dim font-medium hover:border-sam-accent/50 transition-all cursor-not-allowed opacity-60"
+                      >
+                        Coming Soon
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
 
         {/* Terms Footer */}
@@ -2864,17 +2929,17 @@ export default function SelectVMPage() {
                           onChange={(e) => setAwsRegion(e.target.value)}
                           className="w-full px-4 py-2.5 rounded-lg bg-sam-bg border border-sam-border focus:border-sam-accent focus:ring-1 focus:ring-sam-accent/30 transition-all text-sam-text text-sm"
                         >
-                        {(awsRegions.length > 0 ? awsRegions : [
-                          { id: 'us-east-1', name: 'US East (N. Virginia)' },
-                          { id: 'us-west-2', name: 'US West (Oregon)' },
-                          { id: 'eu-west-1', name: 'Europe (Ireland)' },
-                          { id: 'ap-southeast-1', name: 'Asia Pacific (Singapore)' },
-                        ]).map((region) => (
-                          <option key={region.id} value={region.id}>
-                            {region.name}
-                          </option>
-                        ))}
-                      </select>
+                          {(awsRegions.length > 0 ? awsRegions : [
+                            { id: 'us-east-1', name: 'US East (N. Virginia)' },
+                            { id: 'us-west-2', name: 'US West (Oregon)' },
+                            { id: 'eu-west-1', name: 'Europe (Ireland)' },
+                            { id: 'ap-southeast-1', name: 'Asia Pacific (Singapore)' },
+                          ]).map((region) => (
+                            <option key={region.id} value={region.id}>
+                              {region.name}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                     )}
 
