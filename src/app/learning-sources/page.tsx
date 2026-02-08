@@ -238,7 +238,7 @@ function LearningSourcesContent() {
   const [telegramBotToken, setTelegramBotToken] = useState('')
   const [telegramUserId, setTelegramUserId] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
-  
+
   // Stored LLM API key management
   const [hasStoredApiKey, setHasStoredApiKey] = useState(false)
   const [storedApiKeyMasked, setStoredApiKeyMasked] = useState<string | null>(null)
@@ -338,7 +338,7 @@ function LearningSourcesContent() {
   // Handle saving a new API key
   const handleSaveApiKey = async () => {
     if (!llmApiKey.trim()) return
-    
+
     setIsSavingApiKey(true)
     try {
       const response = await fetch('/api/setup/model-config', {
@@ -346,7 +346,7 @@ function LearningSourcesContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiKey: llmApiKey.trim() }),
       })
-      
+
       if (response.ok) {
         const data = await response.json()
         setHasStoredApiKey(true)
@@ -371,7 +371,7 @@ function LearningSourcesContent() {
       const response = await fetch('/api/setup/anthropic-key', {
         method: 'DELETE',
       })
-      
+
       if (response.ok) {
         setHasStoredApiKey(false)
         setStoredApiKeyMasked(null)
@@ -605,7 +605,7 @@ function LearningSourcesContent() {
   const handleStartSetup = async () => {
     // Check if we have an LLM API key
     const hasLlmKey = llmApiKey.trim() || hasStoredApiKey
-    
+
     if (!hasLlmKey) {
       setSetupError('Anthropic API key is required for Claude model')
       return
@@ -864,7 +864,7 @@ function LearningSourcesContent() {
                       {hasStoredApiKey && <span className="text-xs text-green-400 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> {storedLlmProvider ? `${storedLlmProvider} configured` : 'Configured'}</span>}
                     </div>
                     <p className="text-xs text-sam-text-dim mb-3">Paste your API key from any supported provider. We&apos;ll auto-detect which one it is.</p>
-                    
+
                     {hasStoredApiKey && !isEditingApiKey ? (
                       <div className="flex items-center gap-3 p-3 rounded-lg bg-sam-accent/10 border border-sam-accent/30">
                         <Key className="w-5 h-5 text-sam-accent flex-shrink-0" />
@@ -984,7 +984,7 @@ function LearningSourcesContent() {
             <div className="flex-1">
               <h3 className="text-base font-display font-semibold text-sam-text mb-2">Feedback</h3>
               <p className="text-sam-text text-sm leading-relaxed">
-                Clawdbot is still actively in development and might be rough around the edges.
+                Clawdbody is still actively in development and might be rough around the edges.
                 If you face any issues, please{' '}
                 <a
                   href="https://github.com/Prakshal-Jain/ClawdBody/issues/new"
@@ -1544,7 +1544,7 @@ function SetupProgressView({
   // Calculate progress based on completed steps + partial progress for active step
   const completedSteps = steps.filter(s => s.check()).length
   const activeStepIndex = steps.findIndex(s => s.active() && !s.check())
-  
+
   // Calculate progress: completed steps + half credit for active step
   const progressPercentage = setupStatus?.status === 'ready'
     ? 100
@@ -1781,33 +1781,33 @@ function ComputerConnectedView({
   const [activeChannelConfig, setActiveChannelConfig] = useState<string | null>(null)
   const [channelError, setChannelError] = useState<string | null>(null)
   const [isConfiguringChannel, setIsConfiguringChannel] = useState(false)
-  
+
   // Discord config
   const [discordBotToken, setDiscordBotToken] = useState('')
   const [discordGuildId, setDiscordGuildId] = useState('')
-  
+
   // Slack config
   const [slackBotToken, setSlackBotToken] = useState('')
   const [slackAppToken, setSlackAppToken] = useState('')
-  
+
   // WhatsApp config (Meta Business)
   const [whatsappPhoneNumberId, setWhatsappPhoneNumberId] = useState('')
   const [whatsappAccessToken, setWhatsappAccessToken] = useState('')
   const [whatsappVerifyToken, setWhatsappVerifyToken] = useState('')
-  
+
   // Signal config
   const [signalPhoneNumber, setSignalPhoneNumber] = useState('')
-  
+
   // Matrix config
   const [matrixHomeserver, setMatrixHomeserver] = useState('')
   const [matrixAccessToken, setMatrixAccessToken] = useState('')
   const [matrixUserId, setMatrixUserId] = useState('')
-  
+
   // SMS config (Twilio)
   const [twilioAccountSid, setTwilioAccountSid] = useState('')
   const [twilioAuthToken, setTwilioAuthToken] = useState('')
   const [twilioPhoneNumber, setTwilioPhoneNumber] = useState('')
-  
+
   // Email config (IMAP)
   const [emailImapServer, setEmailImapServer] = useState('')
   const [emailSmtpServer, setEmailSmtpServer] = useState('')
@@ -1847,7 +1847,7 @@ function ComputerConnectedView({
 
   // Handle VM migration for legacy VMs that don't support WebSocket
   const [isMigrating, setIsMigrating] = useState(false)
-  
+
   const handleMigrate = async () => {
     const confirmed = confirm(
       'Your VM was created before the terminal upgrade.\n\n' +
@@ -1857,7 +1857,7 @@ function ComputerConnectedView({
       '3. Reinstall Clawdbot\n\n' +
       'This will take a few minutes. Continue?'
     )
-    
+
     if (!confirmed) return
 
     setIsMigrating(true)
@@ -1867,7 +1867,7 @@ function ComputerConnectedView({
       const vmProvider = currentVM?.provider || setupStatus?.vmProvider || 'orgo'
       const orgoProjectId = currentVM?.orgoProjectId
       const orgoProjectName = currentVM?.orgoProjectName
-      
+
       // Delete the old VM
       if (vmId) {
         const deleteRes = await fetch(`/api/vms/${vmId}`, { method: 'DELETE' })
@@ -1875,7 +1875,7 @@ function ComputerConnectedView({
           throw new Error('Failed to delete old VM')
         }
       }
-      
+
       // Create a new VM with the same settings
       const createRes = await fetch('/api/vms', {
         method: 'POST',
@@ -1888,17 +1888,17 @@ function ComputerConnectedView({
           orgoProjectName,
         }),
       })
-      
+
       if (!createRes.ok) {
         const error = await createRes.json()
         throw new Error(error.error || 'Failed to create new VM')
       }
-      
+
       const { vm: newVM } = await createRes.json()
-      
+
       // Redirect to the new VM's setup page
       window.location.href = `/learning-sources?vmId=${newVM.id}`
-      
+
     } catch (error) {
       console.error('Migration failed:', error)
       alert(`Migration failed: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again.`)
@@ -1989,70 +1989,70 @@ function ComputerConnectedView({
               onMigrate={handleMigrate}
             />
           ) : /* AWS: Interactive Web Terminal */
-          setupStatus?.vmProvider === 'aws' && setupStatus?.awsPublicIp ? (
-            activeVMTab === 'terminal' ? (
-              <WebTerminal
-                vmId={vmId || undefined}
-                title={`ubuntu@${setupStatus.awsPublicIp}`}
-                autoConnect={true}
-                className="w-full h-full"
-              />
+            setupStatus?.vmProvider === 'aws' && setupStatus?.awsPublicIp ? (
+              activeVMTab === 'terminal' ? (
+                <WebTerminal
+                  vmId={vmId || undefined}
+                  title={`ubuntu@${setupStatus.awsPublicIp}`}
+                  autoConnect={true}
+                  className="w-full h-full"
+                />
+              ) : (
+                <WebTerminal
+                  vmId={vmId || undefined}
+                  title={`ubuntu@${setupStatus.awsPublicIp}`}
+                  autoConnect={true}
+                  className="w-full h-full"
+                />
+              )
+            ) : setupStatus?.vmProvider === 'e2b' && setupStatus?.e2bSandboxId ? (
+              // E2B: Terminal view
+              activeVMTab === 'terminal' ? (
+                <E2BTerminal
+                  vmId={vmId || undefined}
+                  sandboxId={setupStatus?.e2bSandboxId || undefined}
+                  title="E2B Sandbox Terminal"
+                  className="w-full h-full"
+                />
+              ) : (
+                <E2BTerminal
+                  vmId={vmId || undefined}
+                  sandboxId={setupStatus?.e2bSandboxId || undefined}
+                  title="E2B Sandbox Terminal"
+                  className="w-full h-full"
+                />
+              )
+            ) : setupStatus?.vmCreated && setupStatus?.orgoComputerId ? (
+              // Orgo VM: Show content based on active tab
+              activeVMTab === 'screen' ? (
+                // VNC display for Orgo VMs - allows direct interaction
+                <OrgoVNCDisplay
+                  vmId={vmId || undefined}
+                  className="w-full h-full"
+                />
+              ) : activeVMTab === 'terminal' ? (
+                // Terminal tab - Orgo bash terminal
+                <OrgoTerminal
+                  vmId={vmId || undefined}
+                  computerId={setupStatus?.orgoComputerId || undefined}
+                  title="Terminal"
+                  className="w-full h-full"
+                  vmCreatedAt={currentVM?.createdAt}
+                  onMigrate={handleMigrate}
+                />
+              ) : (
+                // Fallback to VNC for Orgo
+                <OrgoVNCDisplay
+                  vmId={vmId || undefined}
+                  className="w-full h-full"
+                />
+              )
             ) : (
-              <WebTerminal
-                vmId={vmId || undefined}
-                title={`ubuntu@${setupStatus.awsPublicIp}`}
-                autoConnect={true}
-                className="w-full h-full"
-              />
-            )
-          ) : setupStatus?.vmProvider === 'e2b' && setupStatus?.e2bSandboxId ? (
-            // E2B: Terminal view
-            activeVMTab === 'terminal' ? (
-              <E2BTerminal
-                vmId={vmId || undefined}
-                sandboxId={setupStatus?.e2bSandboxId || undefined}
-                title="E2B Sandbox Terminal"
-                className="w-full h-full"
-              />
-            ) : (
-              <E2BTerminal
-                vmId={vmId || undefined}
-                sandboxId={setupStatus?.e2bSandboxId || undefined}
-                title="E2B Sandbox Terminal"
-                className="w-full h-full"
-              />
-            )
-          ) : setupStatus?.vmCreated && setupStatus?.orgoComputerId ? (
-            // Orgo VM: Show content based on active tab
-            activeVMTab === 'screen' ? (
-              // VNC display for Orgo VMs - allows direct interaction
-              <OrgoVNCDisplay
-                vmId={vmId || undefined}
-                className="w-full h-full"
-              />
-            ) : activeVMTab === 'terminal' ? (
-              // Terminal tab - Orgo bash terminal
-              <OrgoTerminal
-                vmId={vmId || undefined}
-                computerId={setupStatus?.orgoComputerId || undefined}
-                title="Terminal"
-                className="w-full h-full"
-                vmCreatedAt={currentVM?.createdAt}
-                onMigrate={handleMigrate}
-              />
-            ) : (
-              // Fallback to VNC for Orgo
-              <OrgoVNCDisplay
-                vmId={vmId || undefined}
-                className="w-full h-full"
-              />
-            )
-          ) : (
-            <div className="flex flex-col items-center gap-3 text-sam-text-dim">
-              <Server className="w-8 h-8" />
-              <p className="text-sm font-mono">VM not yet created</p>
-            </div>
-          )}
+              <div className="flex flex-col items-center gap-3 text-sam-text-dim">
+                <Server className="w-8 h-8" />
+                <p className="text-sm font-mono">VM not yet created</p>
+              </div>
+            )}
         </div>
       </div>
 
@@ -2127,7 +2127,7 @@ function ComputerConnectedView({
           </div>
         </div>
 
-              <button
+        <button
           onClick={handleDelete}
           disabled={isDeleting}
           className="mt-2 px-3 py-1.5 rounded-lg border border-sam-error/50 bg-sam-error/10 text-sam-error hover:bg-sam-error/20 transition-all font-display font-medium text-xs disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
@@ -2150,15 +2150,15 @@ function ComputerConnectedView({
           <h3 className="font-display font-semibold mb-3 text-xs text-sam-text-dim uppercase tracking-wide">
             Connect Channels
           </h3>
-              <div className="space-y-2">
+          <div className="space-y-2">
             {/* Telegram */}
             {setupStatus.telegramConfigured && setupStatus.gatewayStarted ? (
               <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-green-500/30 bg-green-500/5 w-full text-xs">
                 <div className="w-6 h-6 rounded-md bg-[#0088cc] flex items-center justify-center flex-shrink-0">
                   <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+                    <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
                   </svg>
-                  </div>
+                </div>
                 <span className="font-medium text-green-500">Telegram</span>
                 <CheckCircle2 className="w-3.5 h-3.5 text-green-500 ml-auto" />
               </div>
@@ -2167,7 +2167,7 @@ function ComputerConnectedView({
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-5 h-5 rounded bg-[#0088cc] flex items-center justify-center">
                     <svg className="w-3 h-3 text-white" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+                      <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
                     </svg>
                   </div>
                   <span className="text-xs font-semibold text-[#0088cc]">Configure Telegram</span>
@@ -2219,7 +2219,7 @@ function ComputerConnectedView({
               <button onClick={() => setActiveChannelConfig('telegram')} className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-sam-border bg-sam-surface/50 hover:border-[#0088cc]/50 hover:bg-[#0088cc]/5 transition-all w-full text-xs group">
                 <div className="w-6 h-6 rounded-md bg-[#0088cc] flex items-center justify-center flex-shrink-0">
                   <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+                    <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
                   </svg>
                 </div>
                 <span className="font-medium text-sam-text group-hover:text-[#0088cc] transition-colors">Telegram</span>
@@ -2233,7 +2233,7 @@ function ComputerConnectedView({
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-5 h-5 rounded bg-[#5865F2] flex items-center justify-center">
                     <svg className="w-3 h-3 text-white" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.36-.698.772-1.362 1.225-1.993a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128c.12-.098.246-.198.373-.292a.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/>
+                      <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.36-.698.772-1.362 1.225-1.993a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128c.12-.098.246-.198.373-.292a.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z" />
                     </svg>
                   </div>
                   <span className="text-xs font-semibold text-[#5865F2]">Configure Discord</span>
@@ -2259,12 +2259,12 @@ function ComputerConnectedView({
               <button onClick={() => setActiveChannelConfig('discord')} className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-sam-border bg-sam-surface/50 hover:border-[#5865F2]/50 hover:bg-[#5865F2]/5 transition-all w-full text-xs group">
                 <div className="w-6 h-6 rounded-md bg-[#5865F2] flex items-center justify-center flex-shrink-0">
                   <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.36-.698.772-1.362 1.225-1.993a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128c.12-.098.246-.198.373-.292a.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/>
+                    <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.36-.698.772-1.362 1.225-1.993a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128c.12-.098.246-.198.373-.292a.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z" />
                   </svg>
                 </div>
                 <span className="font-medium text-sam-text group-hover:text-[#5865F2] transition-colors">Discord</span>
                 <ArrowRight className="w-3 h-3 text-sam-text-dim ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </button>
+              </button>
             )}
 
             {/* Slack */}
@@ -2273,11 +2273,11 @@ function ComputerConnectedView({
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-5 h-5 rounded bg-[#4A154B] flex items-center justify-center">
                     <svg className="w-3 h-3 text-white" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313z"/>
+                      <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313z" />
                     </svg>
-                </div>
+                  </div>
                   <span className="text-xs font-semibold text-[#4A154B]">Configure Slack</span>
-              </div>
+                </div>
                 {channelError && <div className="p-2 rounded bg-sam-error/10 border border-sam-error/30 text-sam-error text-[10px]">{channelError}</div>}
                 <div>
                   <label className="block text-[10px] font-mono text-sam-text-dim mb-0.5">Bot Token <span className="text-sam-error">*</span></label>
@@ -2299,7 +2299,7 @@ function ComputerConnectedView({
               <button onClick={() => setActiveChannelConfig('slack')} className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-sam-border bg-sam-surface/50 hover:border-[#4A154B]/50 hover:bg-[#4A154B]/5 transition-all w-full text-xs group">
                 <div className="w-6 h-6 rounded-md bg-[#4A154B] flex items-center justify-center flex-shrink-0">
                   <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313z"/>
+                    <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313z" />
                   </svg>
                 </div>
                 <span className="font-medium text-sam-text group-hover:text-[#4A154B] transition-colors">Slack</span>
@@ -2313,7 +2313,7 @@ function ComputerConnectedView({
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-5 h-5 rounded bg-[#25D366] flex items-center justify-center">
                     <svg className="w-3 h-3 text-white" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+                      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
                     </svg>
                   </div>
                   <span className="text-xs font-semibold text-[#25D366]">Configure WhatsApp</span>
@@ -2338,17 +2338,17 @@ function ComputerConnectedView({
                   </button>
                   <button onClick={() => { setActiveChannelConfig(null); setChannelError(null); setWhatsappPhoneNumberId(''); setWhatsappAccessToken(''); setWhatsappVerifyToken(''); }} className="px-2 py-1.5 rounded border border-sam-border text-sam-text-dim hover:border-sam-error/50 hover:text-sam-error transition-all font-display font-medium text-[10px]">✕</button>
                 </div>
-          </div>
-        ) : (
+              </div>
+            ) : (
               <button onClick={() => setActiveChannelConfig('whatsapp')} className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-sam-border bg-sam-surface/50 hover:border-[#25D366]/50 hover:bg-[#25D366]/5 transition-all w-full text-xs group">
                 <div className="w-6 h-6 rounded-md bg-[#25D366] flex items-center justify-center flex-shrink-0">
                   <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+                    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
                   </svg>
-            </div>
+                </div>
                 <span className="font-medium text-sam-text group-hover:text-[#25D366] transition-colors">WhatsApp</span>
                 <ArrowRight className="w-3 h-3 text-sam-text-dim ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </button>
+              </button>
             )}
 
             {/* Signal */}
@@ -2357,11 +2357,11 @@ function ComputerConnectedView({
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-5 h-5 rounded bg-[#3A76F0] flex items-center justify-center">
                     <svg className="w-3 h-3 text-white" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 3.6c4.637 0 8.4 3.763 8.4 8.4 0 4.637-3.763 8.4-8.4 8.4-1.476 0-2.864-.38-4.073-1.049l-2.86.754.771-2.78A8.353 8.353 0 013.6 12c0-4.637 3.763-8.4 8.4-8.4z"/>
+                      <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 3.6c4.637 0 8.4 3.763 8.4 8.4 0 4.637-3.763 8.4-8.4 8.4-1.476 0-2.864-.38-4.073-1.049l-2.86.754.771-2.78A8.353 8.353 0 013.6 12c0-4.637 3.763-8.4 8.4-8.4z" />
                     </svg>
-          </div>
+                  </div>
                   <span className="text-xs font-semibold text-[#3A76F0]">Configure Signal</span>
-              </div>
+                </div>
                 {channelError && <div className="p-2 rounded bg-sam-error/10 border border-sam-error/30 text-sam-error text-[10px]">{channelError}</div>}
                 <div>
                   <label className="block text-[10px] font-mono text-sam-text-dim mb-0.5">Phone Number <span className="text-sam-error">*</span></label>
@@ -2379,7 +2379,7 @@ function ComputerConnectedView({
               <button onClick={() => setActiveChannelConfig('signal')} className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-sam-border bg-sam-surface/50 hover:border-[#3A76F0]/50 hover:bg-[#3A76F0]/5 transition-all w-full text-xs group">
                 <div className="w-6 h-6 rounded-md bg-[#3A76F0] flex items-center justify-center flex-shrink-0">
                   <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 3.6c4.637 0 8.4 3.763 8.4 8.4 0 4.637-3.763 8.4-8.4 8.4-1.476 0-2.864-.38-4.073-1.049l-2.86.754.771-2.78A8.353 8.353 0 013.6 12c0-4.637 3.763-8.4 8.4-8.4z"/>
+                    <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 3.6c4.637 0 8.4 3.763 8.4 8.4 0 4.637-3.763 8.4-8.4 8.4-1.476 0-2.864-.38-4.073-1.049l-2.86.754.771-2.78A8.353 8.353 0 013.6 12c0-4.637 3.763-8.4 8.4-8.4z" />
                   </svg>
                 </div>
                 <span className="font-medium text-sam-text group-hover:text-[#3A76F0] transition-colors">Signal</span>
@@ -2393,7 +2393,7 @@ function ComputerConnectedView({
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-5 h-5 rounded bg-[#0DBD8B] flex items-center justify-center">
                     <svg className="w-3 h-3 text-white" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M.632.55v22.9H2.28V24H0V0h2.28v.55zm7.043 7.26v1.157h.033c.309-.443.683-.784 1.117-1.024.433-.245.936-.365 1.5-.365.54 0 1.033.107 1.481.314.448.208.785.582 1.02 1.108.254-.374.6-.706 1.034-.992.434-.287.95-.43 1.546-.43.453 0 .872.056 1.26.167.388.11.716.286.993.53.276.245.489.559.646.951.152.392.23.863.23 1.417v5.728h-2.349V11.52c0-.286-.01-.559-.032-.812a1.755 1.755 0 00-.18-.66 1.106 1.106 0 00-.438-.448c-.194-.11-.457-.166-.785-.166-.332 0-.6.064-.803.189a1.38 1.38 0 00-.48.499 1.946 1.946 0 00-.231.696 5.56 5.56 0 00-.06.785v4.768h-2.35v-4.8c0-.254-.004-.503-.018-.752a2.074 2.074 0 00-.143-.688 1.052 1.052 0 00-.415-.503c-.194-.125-.476-.19-.854-.19-.111 0-.259.024-.439.074-.18.051-.36.143-.53.282-.171.138-.319.334-.439.588-.12.254-.18.593-.18 1.02v4.966H5.46V7.81zm15.693 15.64V.55H21.72V0H24v24h-2.28v-.55z"/>
+                      <path d="M.632.55v22.9H2.28V24H0V0h2.28v.55zm7.043 7.26v1.157h.033c.309-.443.683-.784 1.117-1.024.433-.245.936-.365 1.5-.365.54 0 1.033.107 1.481.314.448.208.785.582 1.02 1.108.254-.374.6-.706 1.034-.992.434-.287.95-.43 1.546-.43.453 0 .872.056 1.26.167.388.11.716.286.993.53.276.245.489.559.646.951.152.392.23.863.23 1.417v5.728h-2.349V11.52c0-.286-.01-.559-.032-.812a1.755 1.755 0 00-.18-.66 1.106 1.106 0 00-.438-.448c-.194-.11-.457-.166-.785-.166-.332 0-.6.064-.803.189a1.38 1.38 0 00-.48.499 1.946 1.946 0 00-.231.696 5.56 5.56 0 00-.06.785v4.768h-2.35v-4.8c0-.254-.004-.503-.018-.752a2.074 2.074 0 00-.143-.688 1.052 1.052 0 00-.415-.503c-.194-.125-.476-.19-.854-.19-.111 0-.259.024-.439.074-.18.051-.36.143-.53.282-.171.138-.319.334-.439.588-.12.254-.18.593-.18 1.02v4.966H5.46V7.81zm15.693 15.64V.55H21.72V0H24v24h-2.28v-.55z" />
                     </svg>
                   </div>
                   <span className="text-xs font-semibold text-[#0DBD8B]">Configure Matrix</span>
@@ -2418,14 +2418,14 @@ function ComputerConnectedView({
                   </button>
                   <button onClick={() => { setActiveChannelConfig(null); setChannelError(null); setMatrixHomeserver(''); setMatrixUserId(''); setMatrixAccessToken(''); }} className="px-2 py-1.5 rounded border border-sam-border text-sam-text-dim hover:border-sam-error/50 hover:text-sam-error transition-all font-display font-medium text-[10px]">✕</button>
                 </div>
-          </div>
-        ) : (
+              </div>
+            ) : (
               <button onClick={() => setActiveChannelConfig('matrix')} className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-sam-border bg-sam-surface/50 hover:border-[#0DBD8B]/50 hover:bg-[#0DBD8B]/5 transition-all w-full text-xs group">
                 <div className="w-6 h-6 rounded-md bg-[#0DBD8B] flex items-center justify-center flex-shrink-0">
                   <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M.632.55v22.9H2.28V24H0V0h2.28v.55zm7.043 7.26v1.157h.033c.309-.443.683-.784 1.117-1.024.433-.245.936-.365 1.5-.365.54 0 1.033.107 1.481.314.448.208.785.582 1.02 1.108.254-.374.6-.706 1.034-.992.434-.287.95-.43 1.546-.43.453 0 .872.056 1.26.167.388.11.716.286.993.53.276.245.489.559.646.951.152.392.23.863.23 1.417v5.728h-2.349V11.52c0-.286-.01-.559-.032-.812a1.755 1.755 0 00-.18-.66 1.106 1.106 0 00-.438-.448c-.194-.11-.457-.166-.785-.166-.332 0-.6.064-.803.189a1.38 1.38 0 00-.48.499 1.946 1.946 0 00-.231.696 5.56 5.56 0 00-.06.785v4.768h-2.35v-4.8c0-.254-.004-.503-.018-.752a2.074 2.074 0 00-.143-.688 1.052 1.052 0 00-.415-.503c-.194-.125-.476-.19-.854-.19-.111 0-.259.024-.439.074-.18.051-.36.143-.53.282-.171.138-.319.334-.439.588-.12.254-.18.593-.18 1.02v4.966H5.46V7.81zm15.693 15.64V.55H21.72V0H24v24h-2.28v-.55z"/>
+                    <path d="M.632.55v22.9H2.28V24H0V0h2.28v.55zm7.043 7.26v1.157h.033c.309-.443.683-.784 1.117-1.024.433-.245.936-.365 1.5-.365.54 0 1.033.107 1.481.314.448.208.785.582 1.02 1.108.254-.374.6-.706 1.034-.992.434-.287.95-.43 1.546-.43.453 0 .872.056 1.26.167.388.11.716.286.993.53.276.245.489.559.646.951.152.392.23.863.23 1.417v5.728h-2.349V11.52c0-.286-.01-.559-.032-.812a1.755 1.755 0 00-.18-.66 1.106 1.106 0 00-.438-.448c-.194-.11-.457-.166-.785-.166-.332 0-.6.064-.803.189a1.38 1.38 0 00-.48.499 1.946 1.946 0 00-.231.696 5.56 5.56 0 00-.06.785v4.768h-2.35v-4.8c0-.254-.004-.503-.018-.752a2.074 2.074 0 00-.143-.688 1.052 1.052 0 00-.415-.503c-.194-.125-.476-.19-.854-.19-.111 0-.259.024-.439.074-.18.051-.36.143-.53.282-.171.138-.319.334-.439.588-.12.254-.18.593-.18 1.02v4.966H5.46V7.81zm15.693 15.64V.55H21.72V0H24v24h-2.28v-.55z" />
                   </svg>
-            </div>
+                </div>
                 <span className="font-medium text-sam-text group-hover:text-[#0DBD8B] transition-colors">Matrix</span>
                 <ArrowRight className="w-3 h-3 text-sam-text-dim ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
               </button>
@@ -2457,7 +2457,7 @@ function ComputerConnectedView({
                 <div className="flex items-center gap-1.5 pt-1">
                   <button onClick={() => { setChannelError('Channel configuration coming soon'); }} disabled={isConfiguringChannel || !twilioAccountSid.trim() || !twilioAuthToken.trim() || !twilioPhoneNumber.trim()} className="flex-1 px-2 py-1.5 rounded bg-sam-accent text-sam-bg hover:bg-sam-accent-dim disabled:opacity-50 disabled:cursor-not-allowed transition-all font-display font-medium text-[10px] flex items-center justify-center gap-1">
                     {isConfiguringChannel ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : 'Connect'}
-        </button>
+                  </button>
                   <button onClick={() => { setActiveChannelConfig(null); setChannelError(null); setTwilioAccountSid(''); setTwilioAuthToken(''); setTwilioPhoneNumber(''); }} className="px-2 py-1.5 rounded border border-sam-border text-sam-text-dim hover:border-sam-error/50 hover:text-sam-error transition-all font-display font-medium text-[10px]">✕</button>
                 </div>
               </div>
@@ -2477,7 +2477,7 @@ function ComputerConnectedView({
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-5 h-5 rounded bg-gradient-to-br from-[#4285F4] via-[#EA4335] to-[#FBBC05] flex items-center justify-center">
                     <svg className="w-2.5 h-2.5 text-white" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>
+                      <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" />
                     </svg>
                   </div>
                   <span className="text-xs font-semibold text-[#EA4335]">Configure Email (IMAP)</span>
@@ -2515,7 +2515,7 @@ function ComputerConnectedView({
                 <div className="flex items-center gap-1.5 pt-1">
                   <button onClick={() => { setChannelError('Channel configuration coming soon'); }} disabled={isConfiguringChannel || !emailImapServer.trim() || !emailSmtpServer.trim() || !emailUsername.trim() || !emailPassword.trim()} className="flex-1 px-2 py-1.5 rounded bg-[#EA4335] text-white hover:bg-[#D33426] disabled:opacity-50 disabled:cursor-not-allowed transition-all font-display font-medium text-[10px] flex items-center justify-center gap-1">
                     {isConfiguringChannel ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : 'Connect'}
-        </button>
+                  </button>
                   <button onClick={() => { setActiveChannelConfig(null); setChannelError(null); setEmailImapServer(''); setEmailSmtpServer(''); setEmailUsername(''); setEmailPassword(''); setEmailImapPort('993'); setEmailSmtpPort('587'); }} className="px-2 py-1.5 rounded border border-sam-border text-sam-text-dim hover:border-sam-error/50 hover:text-sam-error transition-all font-display font-medium text-[10px]">✕</button>
                 </div>
               </div>
@@ -2523,7 +2523,7 @@ function ComputerConnectedView({
               <button onClick={() => setActiveChannelConfig('email')} className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-sam-border bg-sam-surface/50 hover:border-[#EA4335]/50 hover:bg-[#EA4335]/5 transition-all w-full text-xs group">
                 <div className="w-6 h-6 rounded-md bg-gradient-to-br from-[#4285F4] via-[#EA4335] to-[#FBBC05] flex items-center justify-center flex-shrink-0">
                   <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>
+                    <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" />
                   </svg>
                 </div>
                 <span className="font-medium text-sam-text group-hover:text-[#EA4335] transition-colors">Email (IMAP)</span>
